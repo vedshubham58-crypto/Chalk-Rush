@@ -70,12 +70,29 @@ data class FeedItem(val text: String, val at: Float)
 class Game(
     val size: Int = 120,
     botCount: Int = 7,
-    val roundSeconds: Float = 180f,
+    val roundSeconds: Float = 45f,
     seed: Long = System.nanoTime(),
     myCharacter: Character = Characters.all[0],
     countdownSeconds: Float = 3f,
     private val powerUpsEnabled: Boolean = true,
+    minBoldness: Float = 0.7f,
+    maxBoldness: Float = 1.4f,
+    /** Bots move at this fraction of normal speed. */
+    private val botSpeed: Float = 1f,
+    /** Owning this much of the board wins the round straight away. */
+    val winPercent: Float = 101f,
 ) {
+    constructor(map: GameMap, myCharacter: Character, seed: Long = System.nanoTime()) : this(
+        size = map.size,
+        botCount = map.bots,
+        seed = seed,
+        myCharacter = myCharacter,
+        minBoldness = map.minBoldness,
+        maxBoldness = map.maxBoldness,
+        botSpeed = map.botSpeed,
+        winPercent = map.winPercent,
+    )
+
     val random = Random(seed)
     val cells get() = size * size
 
@@ -90,7 +107,7 @@ class Game(
         val others = Characters.all.filter { it.id != myCharacter.id }.shuffled(random)
         for (i in 1..botCount) {
             add(Player(i, others[(i - 1) % others.size], isBot = true).also {
-                it.brain = BotBrain(boldness = 0.7f + random.nextFloat() * 0.7f)
+                it.brain = BotBrain(boldness = minBoldness + random.nextFloat() * (maxBoldness - minBoldness))
             })
         }
     }
@@ -107,8 +124,19 @@ class Game(
     val timeLeft: Float get() = (roundSeconds - elapsed).coerceAtLeast(0f)
     private var deadFor = 0f
 
-    /** True once the round ends, or shortly after you are knocked out. */
-    val over: Boolean get() = elapsed >= roundSeconds || (!me.alive && deadFor >= DEATH_PAUSE)
+    /** True once the round ends, you claim enough land, or shortly after you are knocked out. */
+    val over: Boolean
+        get() = elapsed >= roundSeconds || (!me.alive && deadFor >= DEATH_PAUSE) || wonEarly
+
+    /** You reached [winPercent] before time ran out. */
+    val wonEarly: Boolean get() = me.alive && percent(me) >= winPercent
+
+    /** You won: still standing, and either hit the target or had the most land at the end. */
+    val won: Boolean get() = me.alive && (wonEarly || (elapsed >= roundSeconds && myRank() == 1))
+
+    /** Whether the one revive per round has been used. */
+    var revived = false
+        private set
 
     val feed = ArrayList<FeedItem>()
 
@@ -171,8 +199,32 @@ class Game(
         feed.removeAll { elapsed - it.at > 4f }
     }
 
+    /**
+     * Brings you back after a knockout (once per round, for watching a video).
+     * You keep your land and come back on it with a shield.
+     */
+    fun revive() {
+        if (me.alive || revived) return
+        revived = true
+        deadFor = 0f
+        val home = (0 until cells).firstOrNull { owner[it] == me.id }
+        if (home == null) {
+            spawn(me)
+        } else {
+            me.cellX = home % size
+            me.cellY = home / size
+            me.x = me.cellX + 0.5f
+            me.y = me.cellY + 0.5f
+            me.alive = true
+            me.knockout = null
+            me.knockedOutBy = null
+        }
+        me.shield = 3f
+    }
+
     fun speedOf(p: Player): Float {
         var s = SPEED
+        if (p.isBot) s *= botSpeed
         if (p.character.perk == Perk.FASTER) s *= 1.1f
         if (p.boost > 0f) s *= 1.6f
         return s
@@ -439,7 +491,7 @@ class Game(
 
     companion object {
         /** Cells per second. */
-        const val SPEED = 7f
+        const val SPEED = 8.5f
 
         /** Radians per second. */
         const val TURN_RATE = 6f

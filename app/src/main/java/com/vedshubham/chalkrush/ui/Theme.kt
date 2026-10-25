@@ -1,62 +1,60 @@
 package com.vedshubham.chalkrush.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-private val Light = lightColorScheme(
-    primary = Color(0xFF2E86C1),
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFD3EAF8),
-    onPrimaryContainer = Color(0xFF0E3A57),
-    secondary = Color(0xFFC2185B),
-    background = Color(0xFFF4F1EA),
-    surface = Color(0xFFF4F1EA),
-    surfaceVariant = Color(0xFFE6E1D8),
-    onSurfaceVariant = Color(0xFF55524C),
-    outline = Color(0xFF8A867F),
-)
-
-private val Dark = darkColorScheme(
-    primary = Color(0xFF7EC8F2),
-    onPrimary = Color(0xFF06324D),
-    primaryContainer = Color(0xFF1D4A68),
-    onPrimaryContainer = Color(0xFFD3EAF8),
-    secondary = Color(0xFFF48FB1),
-    background = Color(0xFF1C1D20),
-    surface = Color(0xFF1C1D20),
-    surfaceVariant = Color(0xFF2C2D31),
-    onSurfaceVariant = Color(0xFFC9C6C0),
-    outline = Color(0xFF8F8C86),
+// The game is always dark: neon needs a night sky.
+private val Neon = darkColorScheme(
+    primary = Color(0xFF00E5FF),
+    onPrimary = Color(0xFF00222A),
+    secondary = Color(0xFFFF2BD6),
+    background = Color(0xFF090C22),
+    surface = Color(0xFF090C22),
+    surfaceVariant = Color(0xFF161B3D),
+    onSurfaceVariant = Color(0xFFB9C0E8),
+    outline = Color(0xFF5A6399),
 )
 
 @Composable
 fun ChalkRushTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) Dark else Light, content = content)
+    MaterialTheme(colorScheme = Neon, content = content)
 }
 
-/** Chalk colours for each player (you are always the first). */
+/** A rider's neon colour and a darker shade of it. */
 data class ChalkColor(val fill: Color, val edge: Color)
 
+/** One colour per character, by character id. */
 val PlayerColors = listOf(
-    ChalkColor(Color(0xFF7EC8F2), Color(0xFF2E86C1)), // you: sky blue
-    ChalkColor(Color(0xFFF48FB1), Color(0xFFC2185B)),
-    ChalkColor(Color(0xFFFFD966), Color(0xFFD4A20F)),
-    ChalkColor(Color(0xFF8ED69A), Color(0xFF3D9450)),
-    ChalkColor(Color(0xFFFFB574), Color(0xFFE0771A)),
-    ChalkColor(Color(0xFFC3AEF0), Color(0xFF6E4FC2)),
-    ChalkColor(Color(0xFF7FDDE6), Color(0xFF16929E)),
-    ChalkColor(Color(0xFFF08A8A), Color(0xFFC23B3B)),
-    ChalkColor(Color(0xFFDDE68A), Color(0xFF97A02A)),
+    ChalkColor(Color(0xFF00E5FF), Color(0xFF00809A)), // Sparky: cyan
+    ChalkColor(Color(0xFFFF4FD8), Color(0xFFA3127F)), // Pip: pink
+    ChalkColor(Color(0xFFFFF04F), Color(0xFFAA9B00)), // Zippy: yellow
+    ChalkColor(Color(0xFF4FFF7A), Color(0xFF13A33A)), // Rocky: green
+    ChalkColor(Color(0xFFFF8A2B), Color(0xFFB34A00)), // Blaze: orange
+    ChalkColor(Color(0xFFB57CFF), Color(0xFF6A2DC2)), // Luna: violet
+    ChalkColor(Color(0xFF9BF6FF), Color(0xFF2A9FB0)), // Frost: ice
+    ChalkColor(Color(0xFFFF4F5E), Color(0xFFB3122A)), // King Kilowatt: red
 )
 
-fun colorOf(id: Int) = PlayerColors[id % PlayerColors.size]
+fun colorOf(characterId: Int) = PlayerColors[characterId % PlayerColors.size]
 
-/** The sidewalk itself looks the same in light and dark mode. */
-val Concrete = Color(0xFF9A9C9F)
-val ConcreteJoint = Color(0xFF85878A)
-val ConcreteSpeck = Color(0xFFADAFB2)
-val OffBoard = Color(0xFF3A3C40)
+/** The look of each map: night colour, grid lines and the glowing wall. */
+data class MapTheme(val night: Color, val grid: Color, val accent: Color)
+
+val MapThemes = listOf(
+    MapTheme(Color(0xFF0B0F2A), Color(0xFF1C2766), Color(0xFF00E5FF)), // Neon Alley
+    MapTheme(Color(0xFF120A24), Color(0xFF3A1F6B), Color(0xFFFF2BD6)), // Grid Garage
+    MapTheme(Color(0xFF1A0B2E), Color(0xFF552A80), Color(0xFFFF8A00)), // Synth Bridge
+    MapTheme(Color(0xFF051A17), Color(0xFF0F5446), Color(0xFF39FF88)), // Pixel Plaza
+    MapTheme(Color(0xFF1C060E), Color(0xFF64142D), Color(0xFFFF3B5C)), // Laser Lanes
+    MapTheme(Color(0xFF181204), Color(0xFF5E4310), Color(0xFFFFC400)), // Night Market
+    MapTheme(Color(0xFF051626), Color(0xFF1A5583), Color(0xFF9BE7FF)), // Ice Circuit
+    MapTheme(Color(0xFF200F04), Color(0xFF6E3410), Color(0xFFFFB000)), // Volt Desert
+    MapTheme(Color(0xFF09091C), Color(0xFF36367A), Color(0xFFB388FF)), // Starlight Tower
+    MapTheme(Color(0xFF050003), Color(0xFF4A0A12), Color(0xFFFF5F1F)), // The Core
+)
+
+fun themeOf(mapIndex: Int) = MapThemes[mapIndex.coerceIn(0, MapThemes.lastIndex)]
+
+val OffBoard = Color(0xFF020309)

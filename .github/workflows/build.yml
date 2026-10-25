@@ -41,4 +41,4 @@ jobs:
           gh release delete test-build --yes --cleanup-tag || true
           gh release create test-build chalk-rush-test.apk --prerelease \
             --title "Test build (latest)" \
-            --notes "Test version with Google test ads. Built from ${GITHUB_SHA::7}."
+            --notes "Test version (Google test ads only). Built from ${GITHUB_SHA::7}."

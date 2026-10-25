@@ -1,1 +1,1 @@
-# No extra rules needed yet.
+# AdMob and UMP ship their own consumer rules.

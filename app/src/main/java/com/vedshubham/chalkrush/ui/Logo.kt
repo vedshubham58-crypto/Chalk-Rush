@@ -15,63 +15,64 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.sin
+
+val NeonCyan = Color(0xFF00E5FF)
+val NeonPink = Color(0xFFFF2BD6)
+val NeonYellow = Color(0xFFFFF04F)
 
 /**
- * The Chalk Rush logo: chunky tilted lettering with a chalk loop swooshing
- * around it and Chalky peeking over the top. [time] animates the swoosh.
+ * The Neon Rush logo: glowing italic lettering with a light trail racing
+ * underneath it and Sparky's bike at the front. [time] animates it.
  */
 @Composable
 fun Logo(time: Float, modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-            // A dashed chalk loop that slowly travels around the title.
+    val flicker = if ((time % 4f) in 2.0f..2.08f) 0.5f else 1f
+    Box(modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxWidth().height(200.dp)) {
             val w = size.width
             val h = size.height
-            val loop = Path().apply {
-                moveTo(w * 0.12f, h * 0.62f)
-                cubicTo(w * 0.05f, h * 0.15f, w * 0.85f, h * 0.05f, w * 0.92f, h * 0.45f)
-                cubicTo(w * 0.98f, h * 0.85f, w * 0.25f, h * 1.0f, w * 0.14f, h * 0.7f)
+            // A light trail sweeping under the title, ending at the bike.
+            val bikeX = w * (0.78f + 0.03f * sin(time * 2f))
+            val trail = Path().apply {
+                moveTo(w * 0.04f, h * 0.9f)
+                cubicTo(w * 0.3f, h * 0.98f, w * 0.5f, h * 0.84f, bikeX, h * 0.86f)
             }
-            drawPath(
-                loop,
-                Color(0xFFFFE066),
-                style = Stroke(
-                    width = 7.dp.toPx(),
-                    cap = StrokeCap.Round,
-                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 18f), phase = -time * 60f),
-                ),
-            )
-            drawCharacter(0, Offset(w * 0.8f, h * 0.2f), 26.dp.toPx(), 2.4f, Mood.HAPPY, time)
+            drawPath(trail, NeonPink.copy(alpha = 0.3f), style = Stroke(16.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(trail, NeonPink, style = Stroke(5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(trail, Color.White, style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Round))
+            drawBike(1, Offset(bikeX + 18.dp.toPx(), h * 0.86f), 13.dp.toPx(), -0.05f, Mood.HAPPY, time)
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.rotate(-5f)) {
-            Text("CHALK", style = logoStyle(Color.White, Color(0xFF2E86C1)))
-            Text("RUSH", style = logoStyle(Color(0xFFFF4FB8), Color(0xFF7A1450)), modifier = Modifier.offset(y = (-18).dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.rotate(-4f).offset(y = (-12).dp)) {
+            Text("NEON", style = neonStyle(NeonCyan.copy(alpha = flicker)))
+            Text("RUSH", style = neonStyle(NeonPink), modifier = Modifier.offset(y = (-22).dp))
         }
     }
 }
 
-private fun logoStyle(fill: Color, shadow: Color) = TextStyle(
-    color = fill,
-    fontSize = 64.sp,
+private fun neonStyle(glow: Color) = TextStyle(
+    color = Color.White,
+    fontSize = 68.sp,
     fontWeight = FontWeight.Black,
-    letterSpacing = 2.sp,
-    shadow = Shadow(shadow, Offset(6f, 10f), 2f),
+    fontStyle = FontStyle.Italic,
+    letterSpacing = 4.sp,
+    shadow = Shadow(glow, Offset.Zero, 28f),
 )
 
 @Composable
 fun CoinIcon(modifier: Modifier = Modifier.size(18.dp)) {
     Canvas(modifier) {
         val r = size.minDimension / 2
-        drawCircle(Color(0xFFC8901A), r, center + Offset(0f, r * 0.12f))
-        drawCircle(Color(0xFFFFC83D), r * 0.9f, center)
-        drawCircle(Color(0xFFFFE28A), r * 0.55f, center, style = Stroke(r * 0.15f))
+        drawCircle(NeonYellow.copy(alpha = 0.3f), r, center)
+        drawCircle(NeonYellow, r * 0.78f, center, style = Stroke(r * 0.22f))
+        drawCircle(Color.White, r * 0.28f, center)
     }
 }
