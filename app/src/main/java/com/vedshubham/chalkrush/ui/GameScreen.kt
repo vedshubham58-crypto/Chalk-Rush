@@ -297,6 +297,7 @@ fun GameScreen(
                     }
                     for (e in game.events) handle(e)
                     game.events.clear()
+                    Music.setIntense(game.countdown <= 0f && game.timeLeft < 10f)
                     val count = ceil(game.countdown).toInt()
                     if (count in 1..3 && count != fx.lastCount) {
                         fx.lastCount = count
