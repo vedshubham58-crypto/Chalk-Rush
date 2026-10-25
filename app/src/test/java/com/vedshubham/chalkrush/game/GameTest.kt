@@ -265,4 +265,48 @@ class GameTest {
         assertTrue(game.me.shielded)
         assertTrue(game.me.boost > 0f)
     }
+
+    @Test
+    fun knockingSomeoneOutTakesTheirLand() {
+        val (game, bot) = duelGame()
+        bot.shield = 0f
+        val mine = game.me.land
+        val theirs = bot.land
+        aimAt(game, game.me, bot, 1)
+        run(game, 0.5f)
+        assertFalse(bot.alive)
+        assertTrue("you should own their land", game.me.land >= mine + theirs)
+        assertEquals(game.owner.count { it == game.me.id }, game.me.land)
+    }
+
+    @Test
+    fun countryArenasKeepEveryoneInside() {
+        for (map in Maps.all) {
+            val game = Game(map, Characters.all[0], seed = map.index.toLong())
+            assertTrue("${map.name} should have room", game.area > 1500)
+            for (p in game.players) assertTrue(game.inBounds(p.cellX, p.cellY))
+            run(game, 30f) {
+                circleHome(game)
+                for (p in game.players) if (p.alive) assertTrue("${p.name} left ${map.name}", game.inBounds(p.cellX, p.cellY))
+            }
+            for (i in 0 until game.cells) if (!game.playable[i]) assertEquals(NONE, game.owner[i])
+            for (p in game.players) assertEquals(game.owner.count { it == p.id }, p.land)
+            assertTrue("bots should claim land in ${map.name}", game.players.drop(1).any { game.percent(it) > 1f })
+        }
+    }
+
+    @Test
+    fun youPickUpCoinsOffTheMap() {
+        val game = Game(size = 60, botCount = 0, seed = 5, countdownSeconds = 0f)
+        var picked = 0
+        val me = game.me
+        // Sweep the board in long straight runs to cross coins.
+        run(game, 20f) {
+            picked += game.events.count { it is GameEvent.CoinPicked }
+            game.events.clear()
+            if (game.elapsed % 3f < 0.02f) game.steer(me.angle + Game.HALF_PI)
+        }
+        assertEquals(picked, me.coins)
+        assertTrue("should grab some coins", me.coins > 0)
+    }
 }

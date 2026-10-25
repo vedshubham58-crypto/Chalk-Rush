@@ -28,6 +28,7 @@ class MiniMap(private val game: Game, theme: MapTheme) {
             val t = game.trailOwner[i]
             val o = game.owner[i]
             pixels[i] = when {
+                !game.playable[i] -> 0
                 t != NONE -> lines[t]
                 o != NONE -> land[o]
                 else -> night

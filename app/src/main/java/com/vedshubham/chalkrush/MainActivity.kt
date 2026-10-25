@@ -24,24 +24,26 @@ import com.vedshubham.chalkrush.ads.Ads
 import com.vedshubham.chalkrush.ads.BannerAd
 import com.vedshubham.chalkrush.data.Store
 import com.vedshubham.chalkrush.data.coinsFor
+import com.vedshubham.chalkrush.data.xpFor
 import com.vedshubham.chalkrush.game.Game
 import com.vedshubham.chalkrush.ui.BonusScreen
 import com.vedshubham.chalkrush.ui.ChalkRushTheme
 import com.vedshubham.chalkrush.ui.GameScreen
 import com.vedshubham.chalkrush.ui.HomeScreen
+import com.vedshubham.chalkrush.ui.ProfileScreen
 import com.vedshubham.chalkrush.ui.ResultsScreen
 import com.vedshubham.chalkrush.ui.ReviveScreen
 import com.vedshubham.chalkrush.ui.Sfx
 import com.vedshubham.chalkrush.ui.Sound
 
-enum class Screen { HOME, PLAYING, REVIVE, BONUS, RESULTS }
+enum class Screen { HOME, PROFILE, PLAYING, REVIVE, BONUS, RESULTS }
 
 /**
- * Full-screen ad between rounds, every 2nd round, and never right after a video
- * the player chose to watch. Ads never interrupt a round: the mid-round Power
- * Drop is an optional video the player taps for a reward.
+ * Full-screen ad between rounds, after every round, but not right after a video
+ * the player chose to watch. Ads never interrupt riding: the mid-round Power
+ * Drop is an optional video, and pausing shows one ad per round before the menu.
  */
-private const val ROUNDS_PER_AD = 2
+private const val ROUNDS_PER_AD = 1
 
 /** Keeps the current round alive when the screen is recreated. */
 class AppViewModel : ViewModel() {
@@ -53,6 +55,10 @@ class AppViewModel : ViewModel() {
     var doubled by mutableStateOf(false)
     var bonusCoins by mutableIntStateOf(0)
     var paused by mutableStateOf(false)
+    var pauseMenu by mutableStateOf(false)
+    var pauseAdShown = false
+    var xpEarned by mutableIntStateOf(0)
+    var leveledUp by mutableStateOf(false)
     var watchedVideo = false
     var roundsSinceAd = 0
 }
@@ -79,11 +85,16 @@ class MainActivity : ComponentActivity() {
 
                 fun startRound() {
                     vm.mapIndex = store.profile.value.currentMap
-                    vm.game = Game(store.profile.value.map, store.profile.value.character)
+                    val p = store.profile.value
+                    vm.game = Game(p.map, p.character, speedBonus = p.speedBonus, shieldBonus = p.shieldBonus).also {
+                        it.me.nickname = p.name.ifBlank { null }
+                    }
                     vm.watchedVideo = false
                     vm.doubled = false
                     vm.bonusCoins = 0
                     vm.paused = false
+                    vm.pauseMenu = false
+                    vm.pauseAdShown = false
                     vm.screen = Screen.PLAYING
                 }
 
@@ -102,8 +113,11 @@ class MainActivity : ComponentActivity() {
                     val percent = game.percent(me)
                     val rank = game.myRank()
                     val streakAfter = if (game.won) profile.winStreak + 1 else 0
-                    vm.coinsEarned = coinsFor(percent, me.kills, rank, game.won, streakAfter, me.character)
-                    vm.newBest = store.saveRound(percent, vm.coinsEarned, game.won)
+                    vm.coinsEarned = coinsFor(percent, me.kills, rank, game.won, streakAfter, me.character) + me.coins
+                    vm.xpEarned = xpFor(percent, me.kills, game.won)
+                    val levelBefore = profile.level
+                    vm.newBest = store.saveRound(percent, vm.coinsEarned, game.won, kills = me.kills, xp = vm.xpEarned)
+                    vm.leveledUp = store.profile.value.level > levelBefore
                     Sfx.play(if (game.won) Sound.CAPTURE_BIG else Sound.COIN)
                     // A win earns the Bonus Rush before the results.
                     vm.screen = if (game.won) Screen.BONUS else Screen.RESULTS
@@ -113,7 +127,21 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this@MainActivity, "No video ready yet. Try again in a moment.", Toast.LENGTH_SHORT).show()
                 }
 
-                BackHandler(enabled = vm.screen != Screen.HOME) { vm.screen = Screen.HOME }
+                fun pause() {
+                    if (vm.paused) return
+                    vm.paused = true
+                    if (!vm.pauseAdShown) {
+                        vm.pauseAdShown = true
+                        Ads.showInterstitial(this@MainActivity) { vm.pauseMenu = true }
+                    } else {
+                        vm.pauseMenu = true
+                    }
+                }
+
+                BackHandler(enabled = vm.screen != Screen.HOME) {
+                    if (vm.screen == Screen.PLAYING) pause() else vm.screen = Screen.HOME
+                }
+                val needsName = profile.name.isBlank() && vm.screen == Screen.HOME
 
                 Surface(Modifier.fillMaxSize()) {
                     val game = vm.game
@@ -128,6 +156,17 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             paused = vm.paused,
+                            pauseMenu = vm.pauseMenu,
+                            onPause = ::pause,
+                            onResume = {
+                                vm.pauseMenu = false
+                                vm.paused = false
+                            },
+                            onQuit = {
+                                vm.pauseMenu = false
+                                vm.paused = false
+                                vm.screen = Screen.HOME
+                            },
                             powerDropReady = adsReady,
                             onPowerDrop = {
                                 if (!vm.paused && game.powerDropOffered) {
@@ -199,6 +238,8 @@ class MainActivity : ComponentActivity() {
                             newBest = vm.newBest,
                             profile = profile,
                             bonusCoins = vm.bonusCoins,
+                            xpEarned = vm.xpEarned,
+                            leveledUp = vm.leveledUp,
                             onDouble = {
                                 val shown = Ads.showRewarded(this@MainActivity) {
                                     vm.watchedVideo = true
@@ -211,6 +252,17 @@ class MainActivity : ComponentActivity() {
                             onHome = { vm.screen = Screen.HOME },
                             modifier = Modifier.safeDrawingPadding(),
                             banner = { AdBanner(adsReady) },
+                        )
+                        needsName || vm.screen == Screen.PROFILE -> ProfileScreen(
+                            profile = profile,
+                            firstTime = needsName,
+                            onSave = { name, emblem ->
+                                store.setProfile(name, emblem)
+                                vm.screen = Screen.HOME
+                            },
+                            onUpgrade = { engine -> if (store.upgrade(engine)) Sfx.play(Sound.POWER_UP) },
+                            onBack = { vm.screen = Screen.HOME },
+                            modifier = Modifier.safeDrawingPadding(),
                         )
                         else -> HomeScreen(
                             profile = profile,
@@ -233,6 +285,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             videoReady = adsReady,
+                            onProfile = { vm.screen = Screen.PROFILE },
                             modifier = Modifier.safeDrawingPadding(),
                             banner = { AdBanner(adsReady) },
                         )

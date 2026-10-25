@@ -93,6 +93,7 @@ fun HomeScreen(
     /** Claims the daily reward; true means by watching a video for triple coins. */
     onClaimDaily: (video: Boolean) -> Unit,
     videoReady: Boolean,
+    onProfile: () -> Unit,
     modifier: Modifier = Modifier,
     banner: @Composable () -> Unit = {},
 ) {
@@ -125,6 +126,26 @@ fun HomeScreen(
                     )
                 }
 
+                // Your profile card: emblem, name and level. Tap to open the profile and upgrades.
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MenuCard, RoundedCornerShape(18.dp))
+                        .border(1.dp, colorOf(profile.selected).fill.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                        .clickable(onClick = onProfile)
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    EmblemBadge(profile.emblem, colorOf(profile.selected).fill, Modifier.size(44.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.name.ifBlank { "Rider" }, color = Color.White, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        LevelBar(profile, Modifier.fillMaxWidth())
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text("PROFILE\n& UPGRADES ›", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.End)
+                }
+
                 Logo(time)
 
                 if (profile.dailyReady) DailyReward(profile, videoReady, onClaimDaily)
@@ -137,7 +158,7 @@ fun HomeScreen(
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp,
                     )
-                    Text("Win to unlock the next map", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                    Text("Conquer a country to unlock the next one", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (m in Maps.all) {
