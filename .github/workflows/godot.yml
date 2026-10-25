@@ -1,0 +1,102 @@
+name: Build Godot version
+
+on:
+  push:
+    paths: ["godot/**", ".github/workflows/godot.yml"]
+  pull_request:
+    paths: ["godot/**", ".github/workflows/godot.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Cache Godot and export templates
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-dl
+          key: godot-${{ env.GODOT_VERSION }}
+
+      - name: Download Godot
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-dl && cd ~/godot-dl
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          curl -sSfLO $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          curl -sSfLO $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+
+      - name: Install Godot and Android settings
+        run: |
+          cd ~/godot-dl
+          unzip -oq Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          sudo mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 /usr/local/bin/godot
+          tpl=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p $tpl
+          unzip -oq Godot_v${GODOT_VERSION}-stable_export_templates.tpz 'templates/android_*' 'templates/version.txt'
+          mv templates/* $tpl/
+          keytool -genkeypair -v -keystore ~/debug.keystore -storepass android -alias androiddebugkey \
+            -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-${GODOT_VERSION}.tres <<EOT
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_SDK_ROOT"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          EOT
+          sed -i 's/^ *//' ~/.config/godot/editor_settings-${GODOT_VERSION}.tres
+          cat ~/.config/godot/editor_settings-${GODOT_VERSION}.tres
+
+      - name: Import project
+        run: godot --headless --path godot --import || true
+
+      - name: Run game rule tests
+        run: godot --headless --path godot -s tests/sim.gd
+
+      - name: Export Android APK
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          # Test builds use the release engine (faster, smaller) signed with the debug key.
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /home/runner/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
+        run: |
+          mkdir -p godot/build
+          godot --headless --path godot --export-release "Android" build/neon-rush.apk
+          ls -la godot/build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neon-rush-godot-apk
+          path: godot/build/neon-rush.apk
+
+      # A fixed download link for phones:
+      # https://github.com/<owner>/<repo>/releases/download/godot-build/neon-rush-3d.apk
+      - name: Publish test APK as a download link
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp godot/build/neon-rush.apk neon-rush-3d.apk
+          gh release delete godot-build --yes --cleanup-tag || true
+          gh release create godot-build neon-rush-3d.apk --prerelease \
+            --title "Neon Rush 3D (Godot) test build" \
+            --notes "3D Godot version, built from ${GITHUB_SHA::7}. Installs next to the old version."
