@@ -9,13 +9,17 @@ func _initialize() -> void:
 	var main = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
 	await process_frame
-	if mode == "play":
+	if mode == "play" or mode == "results":
 		main.start_round()
+	if mode == "results":
+		for k in 200:
+			await process_frame
+		main.game.elapsed = main.game.round_seconds
 	var t := 0.0
 	for k in range(2, args.size()):
 		var at := float(args[k])
 		while t < at:
-			if mode == "play" and main.game and int(t * 10) % 7 == 0:
+			if mode != "menu" and main.game and int(t * 10) % 7 == 0:
 				main.game.steer((main.game.me.dir + 1) % 4)
 			await process_frame
 			t += 1.0 / 30.0

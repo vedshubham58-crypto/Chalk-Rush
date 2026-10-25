@@ -631,7 +631,7 @@ func _end_round() -> void:
 		var a := UI.label(row[0], 32, Color(1, 1, 1, 0.75), false, HORIZONTAL_ALIGNMENT_LEFT)
 		a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(a)
-		grid.add_child(UI.label(row[1], 36, UI.GOLD if row[0] == "Coins" else Color.WHITE, true, HORIZONTAL_ALIGNMENT_RIGHT))
+		grid.add_child(UI.label(row[1], 40, UI.GOLD if row[0] == "Coins" else Color.WHITE, false, HORIZONTAL_ALIGNMENT_RIGHT))
 
 	var lvl := UI.label("Rider level %d" % Save.player_level(), 28, UI.CYAN)
 	col.add_child(lvl)

@@ -74,9 +74,13 @@ jobs:
           GODOT_ANDROID_KEYSTORE_DEBUG_PATH: /home/runner/debug.keystore
           GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+          # Test builds use the release engine (faster, smaller) signed with the debug key.
+          GODOT_ANDROID_KEYSTORE_RELEASE_PATH: /home/runner/debug.keystore
+          GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           mkdir -p godot/build
-          godot --headless --path godot --export-debug "Android" build/neon-rush.apk
+          godot --headless --path godot --export-release "Android" build/neon-rush.apk
           ls -la godot/build
 
       - uses: actions/upload-artifact@v4
