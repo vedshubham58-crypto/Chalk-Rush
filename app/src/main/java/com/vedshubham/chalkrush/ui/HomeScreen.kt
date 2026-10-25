@@ -33,11 +33,13 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vedshubham.chalkrush.data.DAILY_REWARDS
 import com.vedshubham.chalkrush.data.Profile
 import com.vedshubham.chalkrush.game.Character
 import com.vedshubham.chalkrush.game.Characters
@@ -88,6 +90,9 @@ fun HomeScreen(
     onBuy: (Character) -> Unit,
     onSelectMap: (Int) -> Unit,
     onToggleMute: () -> Unit,
+    /** Claims the daily reward; true means by watching a video for triple coins. */
+    onClaimDaily: (video: Boolean) -> Unit,
+    videoReady: Boolean,
     modifier: Modifier = Modifier,
     banner: @Composable () -> Unit = {},
 ) {
@@ -121,6 +126,8 @@ fun HomeScreen(
                 }
 
                 Logo(time)
+
+                if (profile.dailyReady) DailyReward(profile, videoReady, onClaimDaily)
 
                 // Map picker: win a map to unlock the next one.
                 Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -202,6 +209,60 @@ fun HomeScreen(
             }
             banner()
         }
+    }
+}
+
+/** Today's login reward on a 7-day ladder that grows each day you come back. */
+@Composable
+private fun DailyReward(profile: Profile, videoReady: Boolean, onClaim: (video: Boolean) -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Brush.verticalGradient(listOf(Color(0xFF3A1F6B), MenuCard)), RoundedCornerShape(20.dp))
+            .border(2.dp, NeonYellow.copy(alpha = 0.7f), RoundedCornerShape(20.dp))
+            .padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("🎁 DAILY REWARD · DAY ${profile.dailyDay}", color = NeonYellow, fontWeight = FontWeight.Black, fontSize = 18.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            DAILY_REWARDS.forEachIndexed { k, coins ->
+                val day = k + 1
+                val today = day == profile.dailyDay
+                Column(
+                    Modifier
+                        .width(38.dp)
+                        .background(
+                            when {
+                                today -> NeonYellow
+                                day < profile.dailyDay -> Color.White.copy(alpha = 0.25f)
+                                else -> Color.Black.copy(alpha = 0.35f)
+                            },
+                            RoundedCornerShape(8.dp),
+                        )
+                        .padding(vertical = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("D$day", color = if (today) Color.Black else Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("$coins", color = if (today) Color.Black else NeonYellow, fontSize = 12.sp, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { onClaim(false) },
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF13A33A), contentColor = Color.White),
+            ) { Text("Claim ${profile.dailyCoins}", fontWeight = FontWeight.Black) }
+            if (videoReady) {
+                Button(
+                    onClick = { onClaim(true) },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB000), contentColor = Color.Black),
+                ) { Text("▶ Video: ${profile.dailyCoins * 3}", fontWeight = FontWeight.Black) }
+            }
+        }
+        Text("Come back tomorrow for a bigger reward!", color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
     }
 }
 

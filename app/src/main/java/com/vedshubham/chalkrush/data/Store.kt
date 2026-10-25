@@ -9,6 +9,15 @@ import com.vedshubham.chalkrush.game.Perk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.TimeZone
+
+/** Coins for each day of the daily reward ladder; it starts over after day 7. */
+val DAILY_REWARDS = listOf(25, 40, 60, 80, 100, 150, 250)
+
+private fun today(): Long {
+    val now = System.currentTimeMillis()
+    return (now + TimeZone.getDefault().getOffset(now)) / 86_400_000L
+}
 
 data class Profile(
     val coins: Int,
@@ -23,7 +32,15 @@ data class Profile(
     val currentMap: Int,
     val winStreak: Int,
     val bestWinStreak: Int,
+    /** Days in a row the daily reward was claimed, counting the last claim. */
+    val dailyStreak: Int,
+    /** The daily reward is waiting to be claimed today. */
+    val dailyReady: Boolean,
 ) {
+    /** Which day of the 7-day reward ladder today's claim would be (1..7). */
+    val dailyDay: Int get() = dailyStreak % DAILY_REWARDS.size + 1
+    val dailyCoins: Int get() = DAILY_REWARDS[dailyDay - 1]
+
     val character: Character get() = Characters.byId(selected)
     val map: GameMap get() = Maps.byIndex(currentMap)
 }
@@ -47,7 +64,29 @@ class Store(context: Context) {
         currentMap = prefs.getInt(KEY_CURRENT_MAP, 0),
         winStreak = prefs.getInt(KEY_STREAK, 0),
         bestWinStreak = prefs.getInt(KEY_BEST_STREAK, 0),
+        dailyStreak = currentDailyStreak(),
+        dailyReady = prefs.getLong(KEY_DAILY_DAY, -1L) < today(),
     )
+
+    /** The streak still counts if the last claim was today or yesterday. */
+    private fun currentDailyStreak(): Int {
+        val last = prefs.getLong(KEY_DAILY_DAY, -1L)
+        return if (last >= today() - 1) prefs.getInt(KEY_DAILY_STREAK, 0) else 0
+    }
+
+    /** Claims today's reward, times [multiplier] for watching a video. Returns the coins given. */
+    fun claimDaily(multiplier: Int = 1): Int {
+        val p = _profile.value
+        if (!p.dailyReady) return 0
+        val coins = p.dailyCoins * multiplier
+        prefs.edit()
+            .putLong(KEY_DAILY_DAY, today())
+            .putInt(KEY_DAILY_STREAK, p.dailyStreak + 1)
+            .putInt(KEY_COINS, p.coins + coins)
+            .apply()
+        _profile.value = read()
+        return coins
+    }
 
     /**
      * Saves a finished round. A win grows the win streak and unlocks the next
@@ -121,6 +160,8 @@ class Store(context: Context) {
         const val KEY_CURRENT_MAP = "current_map"
         const val KEY_STREAK = "win_streak"
         const val KEY_BEST_STREAK = "best_win_streak"
+        const val KEY_DAILY_DAY = "daily_day"
+        const val KEY_DAILY_STREAK = "daily_streak"
     }
 }
 

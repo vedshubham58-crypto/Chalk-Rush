@@ -2,10 +2,7 @@ package com.vedshubham.chalkrush.game
 
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.cos
 import kotlin.math.floor
-import kotlin.math.sin
 import kotlin.random.Random
 
 /** No one owns this cell. */
@@ -34,8 +31,15 @@ class Player(val id: Int, val character: Character, val isBot: Boolean) {
     /** Position in cell units. Cell (i, j) covers [i, i+1) x [j, j+1). */
     var x = 0f
     var y = 0f
-    var angle = 0f
+    /** Heading: 0 right, 1 down, 2 left, 3 up. Bikes only move along the grid. */
+    var dir = 0
+    val angle: Float get() = dir * Game.HALF_PI
+
+    /** The way this rider wants to go; applied at the next cell centre (no U-turns). */
     var targetAngle = 0f
+
+    /** Riding right alongside someone else's trail, which gives a speed boost. */
+    var grinding = false
     var alive = false
     var respawnIn = 0f
     var cellX = 0
@@ -192,8 +196,8 @@ class Game(
             p.boost = (p.boost - dt).coerceAtLeast(0f)
             p.shield = (p.shield - dt).coerceAtLeast(0f)
             p.brain?.think(this, p, dt)
-            turn(p, dt)
             move(p, dt)
+            p.grinding = isGrinding(p)
         }
         if (elapsed - lastKillAt > STREAK_SECONDS) streak = 0
         feed.removeAll { elapsed - it.at > 4f }
@@ -222,50 +226,104 @@ class Game(
         me.shield = 3f
     }
 
+    /** Whether the mid-round Power Drop has been used. */
+    var powerDropUsed = false
+        private set
+
+    /** The mid-round Power Drop is on offer: about halfway through, while you're riding. */
+    val powerDropOffered: Boolean
+        get() = !powerDropUsed && me.alive && countdown <= 0f && !over &&
+            elapsed in roundSeconds * 0.4f..roundSeconds * 0.4f + POWER_DROP_SECONDS
+
+    /** The reward for watching the Power Drop video: a shield and a speed boost. */
+    fun powerDrop() {
+        if (powerDropUsed || !me.alive) return
+        powerDropUsed = true
+        me.shield = maxOf(me.shield, 5f)
+        me.boost = maxOf(me.boost, 3f)
+        events.add(GameEvent.PickedUp(me.id, PowerType.SHIELD, me.x, me.y))
+    }
+
+    /** Stops offering the Power Drop (no video was ready, or it was skipped). */
+    fun skipPowerDrop() {
+        powerDropUsed = true
+    }
+
     fun speedOf(p: Player): Float {
         var s = SPEED
         if (p.isBot) s *= botSpeed
         if (p.character.perk == Perk.FASTER) s *= 1.1f
         if (p.boost > 0f) s *= 1.6f
+        if (p.grinding) s *= if (p.character.perk == Perk.GRIND_MASTER) 1.6f else 1.35f
         return s
     }
 
-    fun turnRateOf(p: Player): Float =
-        if (p.character.perk == Perk.SHARP_TURNS) TURN_RATE * 1.3f else TURN_RATE
-
-    private fun turn(p: Player, dt: Float) {
-        var diff = (p.targetAngle - p.angle) % TWO_PI
-        if (diff > PI) diff -= TWO_PI
-        if (diff < -PI) diff += TWO_PI
-        val maxTurn = turnRateOf(p) * dt
-        p.angle += if (abs(diff) <= maxTurn) diff else maxTurn * if (diff > 0) 1 else -1
+    private fun isGrinding(p: Player): Boolean {
+        if (p.trail.isEmpty()) return false
+        val side = (p.dir + 1) % 4
+        for (sign in intArrayOf(1, -1)) {
+            val x = p.cellX + DX[side] * sign
+            val y = p.cellY + DY[side] * sign
+            if (!inBounds(x, y)) continue
+            val t = trailOwner[y * size + x]
+            if (t != NONE && t != p.id) return true
+        }
+        return false
     }
 
+    /**
+     * Light-cycle movement: straight along the grid, turning 90 degrees only at
+     * cell centres. The arena wall turns you automatically instead of stopping you.
+     */
     private fun move(p: Player, dt: Float) {
-        val distance = speedOf(p) * dt
-        val steps = ceil(distance / 0.4f).toInt().coerceAtLeast(1)
-        val step = distance / steps
-        repeat(steps) {
-            val nx = p.x + cos(p.angle) * step
-            val ny = p.y + sin(p.angle) * step
-            val cx = floor(nx).toInt()
-            val cy = floor(ny).toInt()
-            // The edge of the sidewalk is a wall: bounce off it.
-            if (cx !in 0 until size || cy !in 0 until size) {
-                if (cx !in 0 until size) p.angle = PI.toFloat() - p.angle
-                if (cy !in 0 until size) p.angle = -p.angle
-                p.targetAngle = p.angle
-                return
+        var remaining = speedOf(p) * dt
+        var guard = 0
+        while (remaining > 1e-5f && p.alive && guard++ < 16) {
+            val cx = p.cellX + 0.5f
+            val cy = p.cellY + 0.5f
+            val along = (p.x - cx) * DX[p.dir] + (p.y - cy) * DY[p.dir]
+            if (abs(along) < 1e-4f) {
+                // At a cell centre: take the turn the rider asked for, then dodge the wall.
+                p.x = cx
+                p.y = cy
+                val want = dirOf(p.targetAngle)
+                if (want != p.dir && want != (p.dir + 2) % 4) p.dir = want
+                if (!inBounds(p.cellX + DX[p.dir], p.cellY + DY[p.dir])) {
+                    p.dir = wallTurn(p)
+                    p.targetAngle = p.angle
+                }
             }
-            p.x = nx
-            p.y = ny
-            if (cx != p.cellX || cy != p.cellY) {
-                // Moving diagonally: visit a side cell too, so lines never have
-                // corner-only gaps that a flood fill could leak through.
-                if (cx != p.cellX && cy != p.cellY && !enter(p, cx, p.cellY)) return
-                if (!enter(p, cx, cy)) return
+            val toCenter = if (along < -1e-4f) -along else 1f - along.coerceAtLeast(0f)
+            val step = minOf(remaining, toCenter)
+            p.x += DX[p.dir] * step
+            p.y += DY[p.dir] * step
+            remaining -= step
+            val nx = floor(p.x).toInt()
+            val ny = floor(p.y).toInt()
+            if ((nx != p.cellX || ny != p.cellY) && inBounds(nx, ny)) {
+                if (!enter(p, nx, ny)) return
+            }
+            if (step == toCenter) {
+                p.x = p.cellX + 0.5f
+                p.y = p.cellY + 0.5f
             }
         }
+    }
+
+    /** Which way to turn at the wall: towards the side with more room. */
+    private fun wallTurn(p: Player): Int {
+        val a = (p.dir + 1) % 4
+        val b = (p.dir + 3) % 4
+        val roomA = if (inBounds(p.cellX + DX[a], p.cellY + DY[a])) roomTo(p, a) else -1
+        val roomB = if (inBounds(p.cellX + DX[b], p.cellY + DY[b])) roomTo(p, b) else -1
+        return if (roomA >= roomB) a else b
+    }
+
+    private fun roomTo(p: Player, d: Int): Int = when (d) {
+        0 -> size - 1 - p.cellX
+        1 -> size - 1 - p.cellY
+        2 -> p.cellX
+        else -> p.cellY
     }
 
     /** Steps [p] into cell (cx, cy). Returns false if they got knocked out. */
@@ -449,8 +507,9 @@ class Game(
         p.y = cy + 0.5f
         p.cellX = cx
         p.cellY = cy
-        p.angle = random.nextFloat() * TWO_PI
+        p.dir = random.nextInt(4)
         p.targetAngle = p.angle
+        p.grinding = false
         p.alive = true
         p.knockout = null
         p.knockedOutBy = null
@@ -493,8 +552,15 @@ class Game(
         /** Cells per second. */
         const val SPEED = 8.5f
 
-        /** Radians per second. */
-        const val TURN_RATE = 6f
+        const val HALF_PI = (PI / 2).toFloat()
+        val DX = intArrayOf(1, 0, -1, 0)
+        val DY = intArrayOf(0, 1, 0, -1)
+
+        /** The grid direction (0 right, 1 down, 2 left, 3 up) nearest to [angle]. */
+        fun dirOf(angle: Float): Int {
+            val turns = Math.round(angle / HALF_PI)
+            return ((turns % 4) + 4) % 4
+        }
         const val START_RADIUS = 2
         const val RESPAWN_SECONDS = 3f
         const val SPAWN_SHIELD = 2f
@@ -502,6 +568,7 @@ class Game(
         const val DEATH_PAUSE = 1.5f
         const val POWER_UP_EVERY = 4f
         const val MAX_POWER_UPS = 8
+        const val POWER_DROP_SECONDS = 8f
         const val TWO_PI = (2 * PI).toFloat()
     }
 }

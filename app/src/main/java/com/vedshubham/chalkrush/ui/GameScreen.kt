@@ -3,12 +3,16 @@ package com.vedshubham.chalkrush.ui
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -21,18 +25,22 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -52,6 +60,8 @@ import com.vedshubham.chalkrush.game.GameEvent
 import com.vedshubham.chalkrush.game.NONE
 import com.vedshubham.chalkrush.game.Player
 import com.vedshubham.chalkrush.game.PowerType
+import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -64,11 +74,17 @@ import kotlin.random.Random
 private val SpeedColor = Color(0xFFFFD23F)
 private val ShieldColor = Color(0xFF5CE1FF)
 private val SplashColor = Color(0xFFFF4FB8)
+private const val HALF_PI_F = (PI / 2).toFloat()
 
 private class Particle(
     var x: Float, var y: Float, val vx: Float, val vy: Float,
     var life: Float, val maxLife: Float, val color: Color, val size: Float,
+    /** Square pixels for the shatter effect, round dots otherwise. */
+    val square: Boolean = false,
 )
+
+/** An expanding ring of light, for captures and knockouts. */
+private class Ring(val x: Float, val y: Float, val color: Color, val maxRadius: Float, var age: Float = 0f)
 
 private class Popup(val text: String, val x: Float, val y: Float, val color: Color, var age: Float = 0f)
 
@@ -81,6 +97,11 @@ private class Effects {
     var shake = 0f
     val particles = ArrayList<Particle>()
     val popups = ArrayList<Popup>()
+    val rings = ArrayList<Ring>()
+
+    /** Each bike's drawn heading, eased toward its real one so corners look smooth. */
+    var angles = FloatArray(0)
+    var wasGrinding = false
     var banner: String? = null
     var bannerColor = Color.White
     var bannerAge = 0f
@@ -96,6 +117,22 @@ private class Effects {
             particles.add(Particle(x, y, cos(a) * s, sin(a) * s, life, life, color, 0.12f + rng.nextFloat() * 0.18f))
         }
         while (particles.size > 500) particles.removeAt(0)
+    }
+
+    /** A bike breaking into square neon pixels. */
+    fun shatter(x: Float, y: Float, color: Color) {
+        repeat(60) {
+            val a = rng.nextFloat() * 6.283f
+            val s = 2f + rng.nextFloat() * 9f
+            val life = 0.6f + rng.nextFloat() * 0.7f
+            val c = if (it % 4 == 0) Color.White else color
+            particles.add(Particle(x, y, cos(a) * s, sin(a) * s, life, life, c, 0.18f + rng.nextFloat() * 0.25f, square = true))
+        }
+        while (particles.size > 500) particles.removeAt(0)
+    }
+
+    fun ring(x: Float, y: Float, color: Color, radius: Float) {
+        rings.add(Ring(x, y, color, radius))
     }
 
     fun show(text: String, color: Color) {
@@ -121,14 +158,30 @@ private class Effects {
         }
         popups.forEach { it.age += dt }
         popups.removeAll { it.age > 1.1f }
+        rings.forEach { it.age += dt }
+        rings.removeAll { it.age > RING_SECONDS }
     }
 }
 
+private const val RING_SECONDS = 0.6f
+
+/**
+ * The round itself. While [paused] (a Power Drop video is showing) nothing moves.
+ * [powerDropReady] says whether a video is loaded to offer the mid-round Power Drop.
+ */
 @Composable
-fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
+fun GameScreen(
+    game: Game,
+    mapIndex: Int,
+    onRoundOver: () -> Unit,
+    paused: Boolean = false,
+    powerDropReady: Boolean = false,
+    onPowerDrop: () -> Unit = {},
+) {
     val theme = themeOf(mapIndex)
     var frame by remember { mutableIntStateOf(0) }
-    val fx = remember(game) { Effects() }
+    val fx = remember(game) { Effects().also { e -> e.angles = FloatArray(game.players.size) { game.players[it].angle } } }
+    val isPaused by rememberUpdatedState(paused)
     val view = LocalView.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 
@@ -149,6 +202,7 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
                     val pct = e.gained * 100f / game.cells
                     fx.popups.add(Popup("+%.1f%%".format(pct), e.x, e.y - 1f, Color.White))
                     fx.burst(e.x, e.y, color, 30 + e.gained.coerceAtMost(200) / 4, 6f)
+                    fx.ring(e.x, e.y, color, 3f + sqrt(e.gained.toFloat()) * 0.8f)
                     fx.happyFor = 1.2f
                     Sfx.play(if (e.gained > 150) Sound.CAPTURE_BIG else Sound.CAPTURE)
                     if (e.gained > 300) fx.show("HUGE!", color)
@@ -157,8 +211,8 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
             }
             is GameEvent.KnockedOut -> {
                 val victim = game.players[e.victimId]
-                fx.burst(e.x, e.y, colorOf(victim.character.id).fill, 50, 9f)
-                fx.burst(e.x, e.y, Color.White, 20, 5f)
+                fx.shatter(e.x, e.y, colorOf(victim.character.id).fill)
+                fx.ring(e.x, e.y, Color.White, 5f)
                 when {
                     e.victimId == me.id -> {
                         fx.shake = 1f
@@ -217,9 +271,16 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
             var last = 0L
             while (!game.over) {
                 withFrameNanos { now ->
-                    val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
+                    val dt = if (last == 0L || isPaused) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
                     last = now
                     game.update(dt)
+                    // Ease each bike's drawn heading toward where it's really going.
+                    for (p in game.players) {
+                        var diff = (p.angle - fx.angles[p.id]) % (2 * PI.toFloat())
+                        if (diff > PI) diff -= 2 * PI.toFloat()
+                        if (diff < -PI) diff += 2 * PI.toFloat()
+                        fx.angles[p.id] = if (!p.alive || abs(diff) < 0.01f) p.angle else fx.angles[p.id] + diff * (dt * 18f).coerceAtMost(1f)
+                    }
                     for (e in game.events) handle(e)
                     game.events.clear()
                     val count = ceil(game.countdown).toInt()
@@ -227,9 +288,30 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
                         fx.lastCount = count
                         Sfx.play(Sound.BEEP)
                     }
-                    // Chalk dust behind fast movers.
+                    // Sparks when grinding along someone's trail.
                     val me = game.me
-                    if (me.alive && game.countdown <= 0f && fx.rng.nextFloat() < if (me.boost > 0f) 0.9f else 0.25f) {
+                    if (dt > 0f) for (p in game.players) {
+                        if (!p.alive || !p.grinding || hypot(p.x - me.x, p.y - me.y) > 25f) continue
+                        repeat(2) {
+                            val side = if (fx.rng.nextBoolean()) 1f else -1f
+                            val a = p.angle + side * HALF_PI_F
+                            fx.particles.add(
+                                Particle(
+                                    p.x + cos(a) * 0.5f, p.y + sin(a) * 0.5f,
+                                    cos(a) * 3f - cos(p.angle) * 4f + (fx.rng.nextFloat() - 0.5f) * 3f,
+                                    sin(a) * 3f - sin(p.angle) * 4f + (fx.rng.nextFloat() - 0.5f) * 3f,
+                                    0.3f, 0.3f, if (fx.rng.nextBoolean()) SpeedColor else Color.White, 0.1f,
+                                ),
+                            )
+                        }
+                    }
+                    if (me.grinding && !fx.wasGrinding) {
+                        fx.popups.add(Popup("GRIND!", me.x, me.y - 1.5f, SpeedColor))
+                        buzz(false)
+                    }
+                    fx.wasGrinding = me.grinding
+                    // Light dust behind your bike.
+                    if (dt > 0f && me.alive && game.countdown <= 0f && fx.rng.nextFloat() < if (me.boost > 0f) 0.9f else 0.25f) {
                         fx.particles.add(
                             Particle(
                                 me.x - cos(me.angle) * 0.5f, me.y - sin(me.angle) * 0.5f,
@@ -304,8 +386,22 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
 
             for (p in fx.particles) {
                 val a = (p.life / p.maxLife).coerceIn(0f, 1f)
-                drawCircle(p.color.copy(alpha = p.color.alpha * a), p.size * cell * (0.5f + a * 0.5f), Offset(ox + p.x * cell, oy + p.y * cell))
+                val color = p.color.copy(alpha = p.color.alpha * a)
+                val r = p.size * cell * (0.5f + a * 0.5f)
+                val at = Offset(ox + p.x * cell, oy + p.y * cell)
+                if (p.square) drawRect(color, at - Offset(r, r), Size(r * 2, r * 2)) else drawCircle(color, r, at)
             }
+            for (ring in fx.rings) {
+                val t = ring.age / RING_SECONDS
+                drawCircle(
+                    ring.color.copy(alpha = (1f - t) * 0.8f),
+                    ring.maxRadius * cell * (0.2f + 0.8f * t),
+                    Offset(ox + ring.x * cell, oy + ring.y * cell),
+                    style = Stroke(cell * 0.35f * (1f - t) + 1f),
+                )
+            }
+
+            val leader = game.ranking().first().takeIf { it.land > 0 }
 
             for (p in game.players) {
                 if (!p.alive && !(p.id == me.id)) continue
@@ -315,20 +411,23 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
                 ) continue
                 val c = center
                 val radius = cell * 0.8f
+                val drawn = fx.angles[p.id]
                 if (p.boost > 0f) {
                     for (k in 1..3) {
-                        val back = c - Offset(cos(p.angle), sin(p.angle)) * (cell * 0.7f * k)
+                        val back = c - Offset(cos(drawn), sin(drawn)) * (cell * 0.7f * k)
                         drawCircle(SpeedColor.copy(alpha = 0.3f / k), radius * (1f - k * 0.15f), back)
                     }
                 }
-                drawBike(p.character.id, c, radius, p.angle, moodOf(game, p, fx), fx.clock)
+                drawBike(p.character.id, c, radius, drawn, moodOf(game, p, fx), fx.clock)
                 if (p.shielded) {
                     val pulse = 0.5f + 0.3f * sin(fx.clock * 8f)
                     drawCircle(ShieldColor.copy(alpha = 0.15f), radius * 1.9f, c)
                     drawCircle(ShieldColor.copy(alpha = pulse), radius * 1.9f, c, style = Stroke(cell * 0.12f))
                 }
                 val label = names[p.id]
-                drawText(label, topLeft = Offset(c.x - label.size.width / 2f, c.y - radius * 2f - label.size.height))
+                val labelTop = c.y - radius * 2.4f - label.size.height
+                drawText(label, topLeft = Offset(c.x - label.size.width / 2f, labelTop))
+                if (p === leader) drawCrown(Offset(c.x, labelTop - cell * 0.5f), cell * 0.45f)
             }
 
             for (pop in fx.popups) {
@@ -339,7 +438,12 @@ fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
                 drawText(layout, topLeft = Offset(x, y))
             }
         }
-        Hud(game, fx, tick = frame, miniMap = miniMap, mapIndex = mapIndex)
+        Hud(game, fx, tick = frame, miniMap = miniMap, mapIndex = mapIndex, powerDropReady = powerDropReady, onPowerDrop = onPowerDrop)
+        if (paused) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f)), contentAlignment = Alignment.Center) {
+                Text("POWER DROP\nincoming…", color = NeonYellow, fontSize = 32.sp, fontWeight = FontWeight.Black, textAlign = TextAlign.Center)
+            }
+        }
     }
 }
 
@@ -423,9 +527,29 @@ private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, t
             var end = x
             while (end + 1 <= x1 && game.owner[y * n + end + 1] == o) end++
             drawRect(
-                colorOf(game.players[o].character.id).fill.copy(alpha = 0.32f),
+                lerp(theme.night, colorOf(game.players[o].character.id).fill, 0.36f),
                 topLeft = Offset(ox + x * cell, oy + y * cell),
                 size = Size((end - x + 1) * cell + 0.5f, cell + 0.5f),
+            )
+            x = end + 1
+        }
+    }
+    // Land stands up off the floor: a darker front face under each southern edge.
+    val depth = cell * 0.35f
+    for (y in y0..y1) {
+        var x = x0
+        while (x <= x1) {
+            val o = game.owner[y * n + x]
+            if (o == NONE || (y < n - 1 && game.owner[(y + 1) * n + x] == o)) {
+                x++
+                continue
+            }
+            var end = x
+            while (end + 1 <= x1 && game.owner[y * n + end + 1] == o && (y == n - 1 || game.owner[(y + 1) * n + end + 1] != o)) end++
+            drawRect(
+                lerp(Color.Black, colorOf(game.players[o].character.id).edge, 0.75f),
+                topLeft = Offset(ox + x * cell, oy + (y + 1) * cell),
+                size = Size((end - x + 1) * cell + 0.5f, depth),
             )
             x = end + 1
         }
@@ -459,15 +583,19 @@ private fun DrawScope.drawTrails(game: Game, cell: Float, ox: Float, oy: Float) 
             if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
         path.lineTo(ox + p.x * cell, oy + p.y * cell)
-        val color = colorOf(p.character.id).fill
-        drawPath(path, color.copy(alpha = 0.25f), style = Stroke(cell * 0.9f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(path, color, style = Stroke(cell * 0.35f, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        drawPath(path, Color.White.copy(alpha = 0.8f), style = Stroke(cell * 0.1f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val color = colorOf(p.character.id)
+        // A light wall: its side face first, then the glow and the white-hot core on top.
+        translate(top = cell * 0.3f) {
+            drawPath(path, color.edge, style = Stroke(cell * 0.4f, cap = StrokeCap.Square, join = StrokeJoin.Miter))
+        }
+        drawPath(path, color.fill.copy(alpha = 0.22f), style = Stroke(cell * 1.1f, cap = StrokeCap.Square, join = StrokeJoin.Miter))
+        drawPath(path, color.fill, style = Stroke(cell * 0.4f, cap = StrokeCap.Square, join = StrokeJoin.Miter))
+        drawPath(path, Color.White.copy(alpha = 0.9f), style = Stroke(cell * 0.12f, cap = StrokeCap.Square, join = StrokeJoin.Miter))
     }
 }
 
 @Composable
-private fun Hud(game: Game, fx: Effects, tick: Int, miniMap: MiniMap, mapIndex: Int) {
+private fun Hud(game: Game, fx: Effects, tick: Int, miniMap: MiniMap, mapIndex: Int, powerDropReady: Boolean, onPowerDrop: () -> Unit) {
     tick // refresh every frame
     val pill = Modifier
         .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
@@ -507,6 +635,22 @@ private fun Hud(game: Game, fx: Effects, tick: Int, miniMap: MiniMap, mapIndex: 
             Text("Computer players", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
         }
 
+        // Progress toward the land that wins the map outright.
+        val goal = game.winPercent.coerceAtMost(100f)
+        val progress = (game.percent(game.me) / goal).coerceIn(0f, 1f)
+        Column(
+            Modifier.align(Alignment.TopCenter).padding(top = 4.dp).width(120.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.fillMaxWidth().height(10.dp).background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(5.dp))) {
+                Box(
+                    Modifier.fillMaxWidth(progress).height(10.dp)
+                        .background(Brush.horizontalGradient(listOf(NeonCyan, NeonPink)), RoundedCornerShape(5.dp)),
+                )
+            }
+            Text("Goal %.0f%%".format(goal), color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+
         Column(
             Modifier.align(Alignment.TopCenter).padding(top = 56.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -544,9 +688,36 @@ private fun Hud(game: Game, fx: Effects, tick: Int, miniMap: MiniMap, mapIndex: 
             )
         }
 
+        // The mid-round Power Drop: an optional video for a shield and a boost.
+        if (powerDropReady && game.powerDropOffered) {
+            val start = game.roundSeconds * 0.4f
+            val left = (Game.POWER_DROP_SECONDS - (game.elapsed - start)) / Game.POWER_DROP_SECONDS
+            val pulse = 1f + 0.06f * sin(fx.clock * 8f)
+            Column(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 64.dp)
+                    .graphicsLayer {
+                        scaleX = pulse
+                        scaleY = pulse
+                    }
+                    .background(Brush.verticalGradient(listOf(Color(0xFFFFD23F), Color(0xFFFF8A00))), RoundedCornerShape(18.dp))
+                    .clickable(onClick = onPowerDrop)
+                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("🎁 POWER DROP", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                Text("▶ Watch a video: shield + speed", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                Box(Modifier.width(150.dp).height(4.dp).background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(2.dp))) {
+                    Box(Modifier.fillMaxWidth(left.coerceIn(0f, 1f)).height(4.dp).background(Color.Black, RoundedCornerShape(2.dp)))
+                }
+            }
+        }
+
         if (game.countdown > 0f) {
             Text(
-                "Swipe to steer your bike.\nLeave your zone and loop back to claim land.\nHit other trails to knock riders out!",
+                "Swipe to steer. Bikes turn at right angles.\nLeave your zone and loop back to claim land.\nRide next to trails to GRIND for speed!\nHit other trails to knock riders out!",
                 color = Color.White,
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,

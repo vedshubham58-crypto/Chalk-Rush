@@ -1,7 +1,7 @@
 package com.vedshubham.chalkrush.game
 
 /** A special ability that makes each character play a little differently. */
-enum class Perk { NONE, SHIELD_START, FASTER, BIG_START, LONG_POWERUPS, BIG_SPLASH, SHARP_TURNS, MORE_COINS }
+enum class Perk { NONE, SHIELD_START, FASTER, BIG_START, LONG_POWERUPS, BIG_SPLASH, GRIND_MASTER, MORE_COINS }
 
 data class Character(
     val id: Int,
@@ -21,7 +21,7 @@ object Characters {
         Character(3, "Rocky", "Likes a big garage", Perk.BIG_START, "Starts with more land", 450),
         Character(4, "Blaze", "Hot-headed and quick", Perk.LONG_POWERUPS, "Power-ups last 50% longer", 600),
         Character(5, "Luna", "Rides by moonlight", Perk.BIG_SPLASH, "Energy bursts are bigger", 800),
-        Character(6, "Frost", "Cool on the corners", Perk.SHARP_TURNS, "Turns 30% sharper", 1000),
+        Character(6, "Frost", "Cool on the corners", Perk.GRIND_MASTER, "Grinding along trails is extra fast", 1000),
         Character(7, "King Kilowatt", "Rules the city", Perk.MORE_COINS, "Earns 50% more coins", 1500),
     )
 
