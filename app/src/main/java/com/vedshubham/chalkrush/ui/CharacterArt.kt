@@ -19,14 +19,17 @@ import kotlin.math.sin
 
 enum class Mood { NORMAL, HAPPY, SCARED, KNOCKED_OUT }
 
-private val Ink = Color(0xFF2B2B2B)
-private val Cheek = Color(0x66FF6F91)
 private val Gold = Color(0xFFFFC83D)
 private val GoldEdge = Color(0xFFC8901A)
 
+private val Skin = Color(0xFFFFE3D1)
+private val SkinShade = Color(0xFFF2B9A0)
+private val Lash = Color(0xFF1B1530)
+
 /**
- * Draws one of the chalk characters: a round body with a face that looks the
- * way it's heading, blinks, and changes expression. [time] is in seconds.
+ * Draws one of the riders as an anime-style head: big shiny eyes that look
+ * the way they're heading, a hairstyle in their neon colour, a cyber earpiece,
+ * blinking and expressions. [time] is in seconds.
  */
 fun DrawScope.drawCharacter(
     characterId: Int,
@@ -38,78 +41,190 @@ fun DrawScope.drawCharacter(
 ) {
     val color = colorOf(characterId)
     val r = radius
+    val hair = color.fill
+    val hairDark = lerp(color.edge, Color.Black, 0.25f)
 
-    // A shaded ball: soft shadow, a darker underside, light from the top left and a shiny spot.
-    drawOval(Color.Black.copy(alpha = 0.25f), Offset(center.x - r * 0.9f, center.y + r * 0.55f), Size(r * 1.8f, r * 0.7f))
-    drawCircle(color.edge, r, center + Offset(0f, r * 0.12f))
-    drawCircle(
-        Brush.radialGradient(
-            listOf(lerp(color.fill, Color.White, 0.55f), color.fill, color.edge),
-            center = center + Offset(-r * 0.35f, -r * 0.45f),
-            radius = r * 1.7f,
-        ),
-        r * 0.96f,
-        center,
-    )
-    drawCircle(color.edge.copy(alpha = 0.6f), r * 0.96f, center, style = Stroke(r * 0.05f))
-    drawOval(Color.White.copy(alpha = 0.7f), Offset(center.x - r * 0.62f, center.y - r * 0.7f), Size(r * 0.42f, r * 0.26f))
+    // Shadow, then hair behind the head.
+    drawOval(Color.Black.copy(alpha = 0.25f), Offset(center.x - r * 0.9f, center.y + r * 0.75f), Size(r * 1.8f, r * 0.55f))
+    drawBackHair(characterId, center, r, hairDark, time)
 
-    drawAccessory(characterId, center, r, color)
+    // Face: a soft oval that narrows to the chin.
+    val face = Path().apply {
+        moveTo(center.x - r * 0.82f, center.y - r * 0.2f)
+        cubicTo(center.x - r * 0.85f, center.y + r * 0.45f, center.x - r * 0.35f, center.y + r * 0.9f, center.x, center.y + r * 0.95f)
+        cubicTo(center.x + r * 0.35f, center.y + r * 0.9f, center.x + r * 0.85f, center.y + r * 0.45f, center.x + r * 0.82f, center.y - r * 0.2f)
+        cubicTo(center.x + r * 0.8f, center.y - r * 1.05f, center.x - r * 0.8f, center.y - r * 1.05f, center.x - r * 0.82f, center.y - r * 0.2f)
+        close()
+    }
+    drawPath(face, Brush.radialGradient(listOf(Skin, Skin, SkinShade), center = center + Offset(-r * 0.2f, -r * 0.2f), radius = r * 1.3f))
 
-    // Eyes look where the character is heading.
-    val look = Offset(cos(lookAngle), sin(lookAngle))
-    val eyeY = center.y - r * 0.12f
-    val eyeGap = r * 0.36f
-    val blinking = mood != Mood.KNOCKED_OUT && ((time + characterId * 0.7f) % 3.2f) < 0.12f
+    // Eyes look where the rider is heading.
+    val look = Offset(cos(lookAngle), sin(lookAngle)) * (r * 0.06f)
+    val eyeY = center.y + r * 0.12f
+    val eyeGap = r * 0.38f
+    val blinking = mood != Mood.KNOCKED_OUT && ((time + characterId * 0.7f) % 3.4f) < 0.12f
     for (side in intArrayOf(-1, 1)) {
-        val eye = Offset(center.x + side * eyeGap, eyeY) + look * (r * 0.1f)
+        val eye = Offset(center.x + side * eyeGap, eyeY) + look
         when {
             mood == Mood.KNOCKED_OUT -> {
-                val d = r * 0.14f
-                drawLine(Ink, eye + Offset(-d, -d), eye + Offset(d, d), r * 0.09f, StrokeCap.Round)
-                drawLine(Ink, eye + Offset(-d, d), eye + Offset(d, -d), r * 0.09f, StrokeCap.Round)
+                // Dizzy swirls.
+                for (k in 0..1) drawCircle(Lash, r * (0.17f - k * 0.08f), eye, style = Stroke(r * 0.05f))
             }
-            blinking -> drawLine(Ink, eye + Offset(-r * 0.14f, 0f), eye + Offset(r * 0.14f, 0f), r * 0.08f, StrokeCap.Round)
+            blinking || mood == Mood.HAPPY -> {
+                // Closed happy arcs.
+                val arc = Path().apply {
+                    moveTo(eye.x - r * 0.18f, eye.y + r * 0.03f)
+                    quadraticTo(eye.x, eye.y - (if (blinking) 0f else r * 0.16f), eye.x + r * 0.18f, eye.y + r * 0.03f)
+                }
+                drawPath(arc, Lash, style = Stroke(r * 0.07f, cap = StrokeCap.Round))
+            }
             else -> {
-                val eyeR = if (mood == Mood.SCARED) r * 0.24f else r * 0.21f
-                drawCircle(Color.White, eyeR, eye)
-                drawCircle(Ink, eyeR * 0.55f, eye + look * (eyeR * 0.4f))
-                drawCircle(Color.White, eyeR * 0.18f, eye + look * (eyeR * 0.4f) + Offset(-eyeR * 0.2f, -eyeR * 0.2f))
+                val w = r * 0.25f
+                val h = if (mood == Mood.SCARED) r * 0.42f else r * 0.36f
+                val top = eye.y - h * 0.55f
+                drawOval(Color.White, Offset(eye.x - w / 2, top), Size(w, h))
+                // Iris in the rider's colour, darker at the top.
+                drawOval(
+                    Brush.verticalGradient(listOf(color.edge, color.fill, lerp(color.fill, Color.White, 0.4f)), startY = top, endY = top + h),
+                    Offset(eye.x - w * 0.42f, top + h * 0.08f),
+                    Size(w * 0.84f, h * 0.88f),
+                )
+                drawOval(Lash, Offset(eye.x - w * 0.2f, top + h * 0.3f), Size(w * 0.4f, h * 0.45f))
+                // Two sparkles.
+                drawCircle(Color.White, w * 0.17f, Offset(eye.x - w * 0.14f, top + h * 0.3f))
+                drawCircle(Color.White, w * 0.08f, Offset(eye.x + w * 0.14f, top + h * 0.68f))
+                // Thick upper lash with a flick at the outer corner.
+                val lash = Path().apply {
+                    moveTo(eye.x - side * w * 0.65f, top + h * 0.12f)
+                    quadraticTo(eye.x, top - h * 0.12f, eye.x + side * w * 0.7f, top + h * 0.05f)
+                    lineTo(eye.x + side * w * 0.85f, top - h * 0.08f)
+                }
+                drawPath(lash, Lash, style = Stroke(r * 0.07f, cap = StrokeCap.Round))
             }
         }
-    }
-    if (characterId == 3 && mood != Mood.KNOCKED_OUT) {
-        // Rocky's bushy eyebrows.
-        for (side in intArrayOf(-1, 1)) {
-            val b = Offset(center.x + side * eyeGap, eyeY - r * 0.33f)
-            drawLine(Ink, b + Offset(-r * 0.17f, -side * r * 0.04f), b + Offset(r * 0.17f, side * r * 0.04f), r * 0.11f, StrokeCap.Round)
-        }
+        // Eyebrow.
+        val browY = eyeY - r * (if (mood == Mood.SCARED) 0.4f else 0.33f)
+        val tilt = if (mood == Mood.SCARED) -side * r * 0.04f else side * r * 0.02f
+        drawLine(hairDark, Offset(center.x + side * r * 0.24f, browY + tilt), Offset(center.x + side * r * 0.5f, browY - tilt), r * 0.05f, StrokeCap.Round)
     }
 
-    // Cheeks and mouth.
-    drawCircle(Cheek, r * 0.12f, Offset(center.x - r * 0.6f, center.y + r * 0.16f))
-    drawCircle(Cheek, r * 0.12f, Offset(center.x + r * 0.6f, center.y + r * 0.16f))
-    val mouth = Offset(center.x, center.y + r * 0.32f)
+    // Blush and mouth.
+    drawOval(Color(0x55FF6F91), Offset(center.x - r * 0.66f, center.y + r * 0.36f), Size(r * 0.24f, r * 0.1f))
+    drawOval(Color(0x55FF6F91), Offset(center.x + r * 0.42f, center.y + r * 0.36f), Size(r * 0.24f, r * 0.1f))
+    val mouth = Offset(center.x, center.y + r * 0.56f)
     when (mood) {
         Mood.HAPPY -> {
             val p = Path().apply {
-                moveTo(mouth.x - r * 0.28f, mouth.y - r * 0.06f)
-                quadraticTo(mouth.x, mouth.y + r * 0.42f, mouth.x + r * 0.28f, mouth.y - r * 0.06f)
+                moveTo(mouth.x - r * 0.15f, mouth.y - r * 0.04f)
+                quadraticTo(mouth.x, mouth.y + r * 0.22f, mouth.x + r * 0.15f, mouth.y - r * 0.04f)
                 close()
             }
-            drawPath(p, Ink)
-            drawCircle(Color(0xFFFF7A8A), r * 0.09f, Offset(mouth.x, mouth.y + r * 0.12f))
+            drawPath(p, Color(0xFF8A1E3C))
+            drawOval(Color(0xFFFF8FA3), Offset(mouth.x - r * 0.07f, mouth.y + r * 0.03f), Size(r * 0.14f, r * 0.07f))
         }
-        Mood.SCARED -> drawCircle(Ink, r * 0.11f, mouth + Offset(0f, r * 0.04f))
-        Mood.KNOCKED_OUT -> drawLine(Ink, mouth + Offset(-r * 0.18f, 0f), mouth + Offset(r * 0.18f, 0f), r * 0.07f, StrokeCap.Round)
+        Mood.SCARED -> drawOval(Color(0xFF8A1E3C), Offset(mouth.x - r * 0.06f, mouth.y - r * 0.04f), Size(r * 0.12f, r * 0.14f))
+        Mood.KNOCKED_OUT -> {
+            val p = Path().apply {
+                moveTo(mouth.x - r * 0.14f, mouth.y)
+                quadraticTo(mouth.x - r * 0.07f, mouth.y - r * 0.06f, mouth.x, mouth.y)
+                quadraticTo(mouth.x + r * 0.07f, mouth.y + r * 0.06f, mouth.x + r * 0.14f, mouth.y)
+            }
+            drawPath(p, Lash, style = Stroke(r * 0.04f, cap = StrokeCap.Round))
+        }
         Mood.NORMAL -> {
             val p = Path().apply {
-                moveTo(mouth.x - r * 0.22f, mouth.y - r * 0.02f)
-                quadraticTo(mouth.x, mouth.y + r * 0.2f, mouth.x + r * 0.22f, mouth.y - r * 0.02f)
+                moveTo(mouth.x - r * 0.08f, mouth.y)
+                quadraticTo(mouth.x, mouth.y + r * 0.06f, mouth.x + r * 0.08f, mouth.y)
             }
-            drawPath(p, Ink, style = Stroke(width = r * 0.08f, cap = StrokeCap.Round))
+            drawPath(p, Lash, style = Stroke(r * 0.04f, cap = StrokeCap.Round))
         }
     }
+
+    drawFrontHair(characterId, center, r, hair, hairDark, time)
+
+    // A glowing cyber earpiece.
+    val ear = Offset(center.x + r * 0.84f, center.y + r * 0.05f)
+    drawCircle(color.fill.copy(alpha = 0.35f), r * 0.2f, ear)
+    drawRoundRect(Color(0xFF151A3A), ear - Offset(r * 0.09f, r * 0.15f), Size(r * 0.18f, r * 0.3f), CornerRadius(r * 0.08f))
+    drawCircle(color.fill, r * 0.05f, ear)
+
+    if (characterId == 1 || characterId == 5 || characterId == 7) drawAccessory(characterId, center + Offset(0f, -r * 0.15f), r, color)
+}
+
+/** Hair that hangs behind the face: tails, long hair or a messy back. */
+private fun DrawScope.drawBackHair(id: Int, c: Offset, r: Float, dark: Color, time: Float) {
+    val sway = sin(time * 3f + id) * r * 0.05f
+    when (id) {
+        1 -> for (side in intArrayOf(-1, 1)) { // Pip: twin tails
+            val tail = Path().apply {
+                moveTo(c.x + side * r * 0.7f, c.y - r * 0.6f)
+                quadraticTo(c.x + side * r * 1.5f + sway, c.y - r * 0.2f, c.x + side * r * 1.2f + sway, c.y + r * 0.9f)
+                quadraticTo(c.x + side * r * 1.0f, c.y + r * 0.2f, c.x + side * r * 0.6f, c.y - r * 0.2f)
+                close()
+            }
+            drawPath(tail, dark)
+        }
+        5 -> drawPath( // Luna: long hair
+            Path().apply {
+                moveTo(c.x - r * 0.95f, c.y - r * 0.4f)
+                quadraticTo(c.x - r * 1.15f + sway, c.y + r * 0.6f, c.x - r * 0.8f + sway, c.y + r * 1.15f)
+                lineTo(c.x + r * 0.8f + sway, c.y + r * 1.15f)
+                quadraticTo(c.x + r * 1.15f + sway, c.y + r * 0.6f, c.x + r * 0.95f, c.y - r * 0.4f)
+                close()
+            },
+            dark,
+        )
+        else -> drawCircle(dark, r * 0.98f, c + Offset(0f, -r * 0.25f))
+    }
+}
+
+/** Bangs and spikes on top of the head, different for each rider. */
+private fun DrawScope.drawFrontHair(id: Int, c: Offset, r: Float, hair: Color, dark: Color, time: Float) {
+    val brush = Brush.verticalGradient(listOf(lerp(hair, Color.White, 0.35f), hair, dark), startY = c.y - r * 1.3f, endY = c.y)
+    val p = Path()
+    val spikes = when (id) {
+        0, 2, 4 -> 5 // spiky
+        3 -> 3 // short
+        6 -> 7 // icy
+        else -> 4 // soft bangs
+    }
+    val height = when (id) {
+        2 -> 1.55f
+        4 -> 1.45f
+        6 -> 1.35f
+        3 -> 1.05f
+        else -> 1.2f
+    }
+    p.moveTo(c.x - r * 0.95f, c.y - r * 0.05f)
+    // Crown of the head.
+    p.cubicTo(c.x - r * 1.0f, c.y - r * 1.0f, c.x - r * 0.4f, c.y - r * 1.25f, c.x, c.y - r * 1.2f)
+    p.cubicTo(c.x + r * 0.4f, c.y - r * 1.25f, c.x + r * 1.0f, c.y - r * 1.0f, c.x + r * 0.95f, c.y - r * 0.05f)
+    // Bangs coming down over the forehead, back from right to left.
+    for (k in spikes downTo 0) {
+        val t = k / spikes.toFloat()
+        val bx = c.x + (t * 2f - 1f) * r * 0.9f
+        val tipY = c.y - r * (if (k % 2 == 0) 0.25f else 0.42f)
+        p.lineTo(bx, if (k == spikes || k == 0) c.y - r * 0.05f else c.y - r * 0.62f)
+        if (k > 0) p.lineTo(bx - r * 0.9f / spikes, tipY)
+    }
+    p.close()
+    drawPath(p, brush)
+    // Spikes sticking up.
+    if (id == 0 || id == 2 || id == 4 || id == 6) {
+        for (k in -2..2) {
+            val base = Offset(c.x + k * r * 0.32f, c.y - r * 1.0f)
+            val lean = k * r * 0.12f + sin(time * 4f + k) * r * 0.02f
+            val spike = Path().apply {
+                moveTo(base.x - r * 0.2f, base.y + r * 0.1f)
+                lineTo(base.x + lean, c.y - r * (height - 0.05f * kotlin.math.abs(k)))
+                lineTo(base.x + r * 0.2f, base.y + r * 0.1f)
+                close()
+            }
+            drawPath(spike, brush)
+        }
+    }
+    // A shine across the hair.
+    drawOval(Color.White.copy(alpha = 0.45f), Offset(c.x - r * 0.55f, c.y - r * 1.02f), Size(r * 0.5f, r * 0.12f))
 }
 
 private fun DrawScope.drawAccessory(id: Int, c: Offset, r: Float, color: ChalkColor) {

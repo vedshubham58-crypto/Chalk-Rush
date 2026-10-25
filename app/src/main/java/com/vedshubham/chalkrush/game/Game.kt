@@ -11,7 +11,15 @@ const val NONE = -1
 /** Why a player was knocked out, for the results screen. */
 enum class Knockout { LINE_CUT, LAND_TAKEN }
 
-enum class PowerType { SPEED, SHIELD, SPLASH }
+enum class PowerType {
+    SPEED, SHIELD, SPLASH,
+
+    /** Slows the riders around you for a few seconds. */
+    FREEZE,
+
+    /** Pulls in the coins around you for a few seconds. */
+    MAGNET,
+}
 
 class PowerUp(val x: Int, val y: Int, val type: PowerType)
 
@@ -23,10 +31,13 @@ sealed interface GameEvent {
     data class PickedUp(val playerId: Int, val type: PowerType, val x: Float, val y: Float) : GameEvent
     data class Blocked(val playerId: Int, val x: Float, val y: Float) : GameEvent
     data class Streak(val count: Int) : GameEvent
+    data class CoinPicked(val x: Float, val y: Float) : GameEvent
 }
 
 class Player(val id: Int, val character: Character, val isBot: Boolean) {
-    val name: String get() = if (isBot) character.name else "You"
+    /** The player's chosen username, for "you". */
+    var nickname: String? = null
+    val name: String get() = nickname ?: if (isBot) character.name else "You"
 
     /** Position in cell units. Cell (i, j) covers [i, i+1) x [j, j+1). */
     var x = 0f
@@ -56,6 +67,11 @@ class Player(val id: Int, val character: Character, val isBot: Boolean) {
     /** Seconds left on each power-up. */
     var boost = 0f
     var shield = 0f
+    var frozen = 0f
+    var magnet = 0f
+
+    /** Coins grabbed off the map this round. */
+    var coins = 0
 
     internal var brain: BotBrain? = null
 
@@ -85,8 +101,19 @@ class Game(
     private val botSpeed: Float = 1f,
     /** Owning this much of the board wins the round straight away. */
     val winPercent: Float = 101f,
+    /** Which cells are inside the arena (a country's shape); null means the whole square. */
+    mask: BooleanArray? = null,
+    /** Bike upgrades for "you": extra speed (0.04 = 4% faster) and extra seconds of spawn shield. */
+    private val mySpeedBonus: Float = 0f,
+    private val myShieldBonus: Float = 0f,
 ) {
-    constructor(map: GameMap, myCharacter: Character, seed: Long = System.nanoTime()) : this(
+    constructor(
+        map: GameMap,
+        myCharacter: Character,
+        seed: Long = System.nanoTime(),
+        speedBonus: Float = 0f,
+        shieldBonus: Float = 0f,
+    ) : this(
         size = map.size,
         botCount = map.bots,
         seed = seed,
@@ -95,10 +122,28 @@ class Game(
         maxBoldness = map.maxBoldness,
         botSpeed = map.botSpeed,
         winPercent = map.winPercent,
+        mask = map.arena.mask(),
+        mySpeedBonus = speedBonus,
+        myShieldBonus = shieldBonus,
     )
 
     val random = Random(seed)
     val cells get() = size * size
+
+    /** Whether each cell is inside the arena. Outside cells are wall. */
+    val playable: BooleanArray = mask ?: BooleanArray(size * size) { true }
+    private val playableCells: IntArray = (0 until size * size).filter { playable[it] }.toIntArray()
+
+    /** How many cells can be owned; percentages are of this. */
+    val area: Int = playableCells.size
+
+    /** The middle of the arena, for bots heading into open space. */
+    val centerX: Int = (playableCells.sumOf { (it % size).toLong() } / area.coerceAtLeast(1)).toInt()
+    val centerY: Int = (playableCells.sumOf { (it / size).toLong() } / area.coerceAtLeast(1)).toInt()
+
+    /** Coins lying on the map, as cell indices. */
+    val fieldCoins = ArrayList<Int>()
+    private var coinIn = 0.5f
 
     /** Who owns each cell (player id or [NONE]). */
     val owner = IntArray(size * size) { NONE }
@@ -162,7 +207,7 @@ class Game(
         players.forEach(::spawn)
     }
 
-    fun percent(p: Player): Float = p.land * 100f / cells
+    fun percent(p: Player): Float = p.land * 100f / area
 
     /** Players by land, biggest first. */
     fun ranking(): List<Player> = players.sortedByDescending { it.land }
@@ -184,7 +229,10 @@ class Game(
         if (over) return
         elapsed += dt
         if (!me.alive) deadFor += dt
-        if (powerUpsEnabled) spawnPowerUps(dt)
+        if (powerUpsEnabled) {
+            spawnPowerUps(dt)
+            spawnCoins(dt)
+        }
         for (p in players) {
             if (!p.alive) {
                 if (p.isBot) {
@@ -195,6 +243,8 @@ class Game(
             }
             p.boost = (p.boost - dt).coerceAtLeast(0f)
             p.shield = (p.shield - dt).coerceAtLeast(0f)
+            p.frozen = (p.frozen - dt).coerceAtLeast(0f)
+            p.magnet = (p.magnet - dt).coerceAtLeast(0f)
             p.brain?.think(this, p, dt)
             move(p, dt)
             p.grinding = isGrinding(p)
@@ -253,8 +303,10 @@ class Game(
         var s = SPEED
         if (p.isBot) s *= botSpeed
         if (p.character.perk == Perk.FASTER) s *= 1.1f
+        if (p.id == 0) s *= 1f + mySpeedBonus
         if (p.boost > 0f) s *= 1.6f
         if (p.grinding) s *= if (p.character.perk == Perk.GRIND_MASTER) 1.6f else 1.35f
+        if (p.frozen > 0f) s *= 0.5f
         return s
     }
 
@@ -314,16 +366,24 @@ class Game(
     private fun wallTurn(p: Player): Int {
         val a = (p.dir + 1) % 4
         val b = (p.dir + 3) % 4
-        val roomA = if (inBounds(p.cellX + DX[a], p.cellY + DY[a])) roomTo(p, a) else -1
-        val roomB = if (inBounds(p.cellX + DX[b], p.cellY + DY[b])) roomTo(p, b) else -1
+        val roomA = roomTo(p, a)
+        val roomB = roomTo(p, b)
+        // Boxed in on three sides (a narrow tip of the country): turn back.
+        if (roomA == 0 && roomB == 0) return (p.dir + 2) % 4
         return if (roomA >= roomB) a else b
     }
 
-    private fun roomTo(p: Player, d: Int): Int = when (d) {
-        0 -> size - 1 - p.cellX
-        1 -> size - 1 - p.cellY
-        2 -> p.cellX
-        else -> p.cellY
+    /** Open cells in a straight line from [p] going [d], before the wall. */
+    private fun roomTo(p: Player, d: Int): Int {
+        var n = 0
+        var x = p.cellX + DX[d]
+        var y = p.cellY + DY[d]
+        while (inBounds(x, y) && n < size) {
+            n++
+            x += DX[d]
+            y += DY[d]
+        }
+        return n
     }
 
     /** Steps [p] into cell (cx, cy). Returns false if they got knocked out. */
@@ -348,6 +408,7 @@ class Game(
             p.trail.add(i)
         }
         if (powerUps.isNotEmpty()) pickUp(p)
+        if (fieldCoins.isNotEmpty()) pickCoins(p)
         return p.alive
     }
 
@@ -384,6 +445,8 @@ class Game(
             push(k * size)
             push(k * size + size - 1)
         }
+        // Everything outside the country counts as outside the loop too.
+        if (area < cells) for (i in 0 until cells) if (!playable[i]) push(i)
         while (head < tail) {
             val i = fillQueue[head++]
             val x = i % size
@@ -393,7 +456,7 @@ class Game(
             if (i < cells - size) push(i + size)
         }
         for (i in 0 until cells) {
-            if (fillMark[i] != stamp && owner[i] != p.id) setOwner(i, p.id)
+            if (fillMark[i] != stamp && owner[i] != p.id && playable[i]) setOwner(i, p.id)
         }
         afterLandGrab(p, before)
     }
@@ -415,12 +478,21 @@ class Game(
         victim.knockedOutBy = by?.name
         for (i in victim.trail) trailOwner[i] = NONE
         victim.trail.clear()
+        // The knocker takes all the loser's land. Your own land stays put so a revive can bring you back on it.
         if (victim.id != me.id) {
-            for (i in 0 until cells) if (owner[i] == victim.id) setOwner(i, NONE)
+            val taker = by?.takeIf { it.alive && it.id != victim.id }
+            val before = taker?.land ?: 0
+            for (i in 0 until cells) if (owner[i] == victim.id) setOwner(i, taker?.id ?: NONE)
+            if (taker != null && taker.land > before) {
+                taker.bestLand = maxOf(taker.bestLand, taker.land)
+                events.add(GameEvent.Captured(taker.id, taker.land - before, victim.x, victim.y))
+            }
         }
         victim.respawnIn = RESPAWN_SECONDS
         victim.boost = 0f
         victim.shield = 0f
+        victim.frozen = 0f
+        victim.magnet = 0f
         events.add(GameEvent.KnockedOut(victim.id, by?.id, victim.x, victim.y))
         if (by != null) {
             by.kills++
@@ -440,9 +512,9 @@ class Game(
         powerUpIn = POWER_UP_EVERY
         if (powerUps.size >= MAX_POWER_UPS) return
         repeat(40) {
-            val x = 3 + random.nextInt(size - 6)
-            val y = 3 + random.nextInt(size - 6)
-            val i = y * size + x
+            val i = playableCells[random.nextInt(area)]
+            val x = i % size
+            val y = i / size
             if (owner[i] == NONE && trailOwner[i] == NONE) {
                 powerUps.add(PowerUp(x, y, PowerType.entries[random.nextInt(PowerType.entries.size)]))
                 return
@@ -462,8 +534,44 @@ class Game(
                 PowerType.SPEED -> p.boost = 3f * longer
                 PowerType.SHIELD -> p.shield = 5f * longer
                 PowerType.SPLASH -> splash(p)
+                PowerType.FREEZE -> for (other in players) {
+                    if (other.alive && other.id != p.id && abs(other.cellX - p.cellX) + abs(other.cellY - p.cellY) < FREEZE_RANGE) {
+                        other.frozen = 3f * longer
+                    }
+                }
+                PowerType.MAGNET -> p.magnet = 6f * longer
             }
             return
+        }
+    }
+
+    private fun spawnCoins(dt: Float) {
+        coinIn -= dt
+        if (coinIn > 0f) return
+        coinIn = COIN_EVERY
+        if (fieldCoins.size >= MAX_FIELD_COINS) return
+        repeat(20) {
+            val i = playableCells[random.nextInt(area)]
+            if (owner[i] == NONE && trailOwner[i] == NONE && i !in fieldCoins) {
+                fieldCoins.add(i)
+                return
+            }
+        }
+    }
+
+    /** Only "you" collect coins; bots just ride over them. A magnet pulls them in from further away. */
+    private fun pickCoins(p: Player) {
+        if (p.id != me.id) return
+        val reach = if (p.magnet > 0f) MAGNET_RANGE else 1
+        val it = fieldCoins.iterator()
+        while (it.hasNext()) {
+            val i = it.next()
+            val x = i % size
+            val y = i / size
+            if (abs(x - p.cellX) > reach || abs(y - p.cellY) > reach) continue
+            it.remove()
+            p.coins++
+            events.add(GameEvent.CoinPicked(x + 0.5f, y + 0.5f))
         }
     }
 
@@ -487,16 +595,30 @@ class Game(
     /** Puts [p] on the board with a small square of starting land. */
     private fun spawn(p: Player) {
         val radius = if (p.character.perk == Perk.BIG_START) START_RADIUS + 1 else START_RADIUS
-        val margin = radius + 4
         var cx = 0
         var cy = 0
-        for (attempt in 0 until 300) {
-            cx = margin + random.nextInt(size - 2 * margin)
-            cy = margin + random.nextInt(size - 2 * margin)
-            if (areaIsFree(cx, cy, radius + 2)) break
+        var found = false
+        for (attempt in 0 until 400) {
+            val c = playableCells[random.nextInt(area)]
+            cx = c % size
+            cy = c / size
+            if (areaIsFree(cx, cy, radius + 2)) {
+                found = true
+                break
+            }
+        }
+        if (!found) {
+            // Crowded: settle for any spot whose own square fits inside the arena.
+            for (attempt in 0 until 400) {
+                val c = playableCells[random.nextInt(area)]
+                cx = c % size
+                cy = c / size
+                if (fitsInside(cx, cy, radius)) break
+            }
         }
         for (y in cy - radius..cy + radius) {
             for (x in cx - radius..cx + radius) {
+                if (!inBounds(x, y)) continue
                 val i = y * size + x
                 val line = trailOwner[i]
                 if (line != NONE && line != p.id) knockOut(players[line], p, Knockout.LINE_CUT)
@@ -514,21 +636,26 @@ class Game(
         p.knockout = null
         p.knockedOutBy = null
         p.boost = 0f
-        p.shield = if (p.character.perk == Perk.SHIELD_START) 5f else SPAWN_SHIELD
+        p.shield = (if (p.character.perk == Perk.SHIELD_START) 5f else SPAWN_SHIELD) + if (p.id == 0) myShieldBonus else 0f
         p.bestLand = maxOf(p.bestLand, p.land)
         p.brain?.reset()
     }
 
+    private fun fitsInside(cx: Int, cy: Int, r: Int): Boolean {
+        for (y in cy - r..cy + r) for (x in cx - r..cx + r) if (!inBounds(x, y)) return false
+        return true
+    }
+
     private fun areaIsFree(cx: Int, cy: Int, r: Int): Boolean {
         for (y in cy - r..cy + r) for (x in cx - r..cx + r) {
-            if (x !in 0 until size || y !in 0 until size) return false
+            if (!inBounds(x, y)) return false
             val i = y * size + x
             if (owner[i] != NONE || trailOwner[i] != NONE) return false
         }
         return players.none { it.alive && abs(it.cellX - cx) <= r && abs(it.cellY - cy) <= r }
     }
 
-    fun inBounds(x: Int, y: Int) = x in 0 until size && y in 0 until size
+    fun inBounds(x: Int, y: Int) = x in 0 until size && y in 0 until size && playable[y * size + x]
 
     /** The nearest cell [p] owns, searching outward in square rings. */
     internal fun nearestOwnCell(p: Player): Pair<Int, Int>? {
@@ -569,6 +696,10 @@ class Game(
         const val POWER_UP_EVERY = 4f
         const val MAX_POWER_UPS = 8
         const val POWER_DROP_SECONDS = 8f
+        const val FREEZE_RANGE = 14
+        const val MAGNET_RANGE = 5
+        const val COIN_EVERY = 0.6f
+        const val MAX_FIELD_COINS = 30
         const val TWO_PI = (2 * PI).toFloat()
     }
 }

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -101,6 +102,8 @@ fun ResultsScreen(
     newBest: Boolean,
     profile: Profile,
     bonusCoins: Int,
+    xpEarned: Int,
+    leveledUp: Boolean,
     onDouble: () -> Unit,
     onPlayAgain: () -> Unit,
     onHome: () -> Unit,
@@ -119,7 +122,7 @@ fun ResultsScreen(
     val lastMap = mapIndex == Maps.all.lastIndex
     val title = when {
         won && lastMap -> "YOU RULE THE CITY!"
-        won -> "MAP CLEARED!"
+        won -> "${Maps.byIndex(mapIndex).name.uppercase()} CONQUERED!"
         reason != null -> "KNOCKED OUT!"
         else -> "SO CLOSE!"
     }
@@ -170,6 +173,21 @@ fun ResultsScreen(
                     CoinIcon(Modifier.size(26.dp))
                     Text("  +$shownCoins coins", color = NeonYellow, fontSize = 24.sp, fontWeight = FontWeight.Black)
                 }
+                Text("+$xpEarned XP", color = NeonCyan, fontWeight = FontWeight.Black, fontSize = 18.sp)
+                if (leveledUp) {
+                    val pop = 1f + 0.08f * kotlin.math.sin(time * 6f)
+                    Text(
+                        "LEVEL UP!  LV ${profile.level}",
+                        color = NeonYellow,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 26.sp,
+                        modifier = Modifier.graphicsLayer {
+                            scaleX = pop
+                            scaleY = pop
+                        },
+                    )
+                }
+                LevelBar(profile, Modifier.fillMaxWidth(0.8f))
                 if (bonusCoins > 0) {
                     Text("+ $bonusCoins from the Bonus Rush", color = NeonYellow.copy(alpha = 0.85f), fontWeight = FontWeight.Bold)
                 }

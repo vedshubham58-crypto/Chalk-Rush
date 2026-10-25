@@ -73,7 +73,7 @@ internal class BotBrain(private val boldness: Float) {
         turnSign = if (r.nextBoolean()) 1f else -1f
         legTime = legLength(game)
         // Head roughly toward open space: away from the nearest edge.
-        val towardCenter = angleTo(me, game.size / 2, game.size / 2)
+        val towardCenter = angleTo(me, game.centerX, game.centerY)
         me.targetAngle = towardCenter + (r.nextFloat() - 0.5f) * PI.toFloat() * 1.4f
     }
 
