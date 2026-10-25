@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- claimed patch -->
+    <path android:fillColor="#7EC8F2" android:pathData="M34,46h22v22h-22z" />
+    <!-- chalk line looping out from the patch -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M56,52h14v-16h-22v10" />
+    <!-- chalk stick -->
+    <path android:fillColor="#FFFFFF" android:pathData="M70,36m-6,0a6,6 0 1,1 12,0a6,6 0 1,1 -12,0" />
+</vector>
