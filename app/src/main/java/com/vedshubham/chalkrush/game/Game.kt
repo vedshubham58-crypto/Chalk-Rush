@@ -394,7 +394,8 @@ class Game(
         val lineOwner = trailOwner[i]
         if (lineOwner != NONE && lineOwner != p.id) {
             val victim = players[lineOwner]
-            if (victim.shielded) {
+            // Your cut always lands: a bot's shield only stops other bots.
+            if (victim.shielded && !(p.id == me.id && victim.isBot)) {
                 events.add(GameEvent.Blocked(victim.id, cx + 0.5f, cy + 0.5f))
             } else {
                 knockOut(victim, p, Knockout.LINE_CUT)

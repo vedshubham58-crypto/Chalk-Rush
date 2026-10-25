@@ -137,11 +137,25 @@ class GameTest {
     @Test
     fun aShieldProtectsYourLine() {
         val (game, bot) = duelGame()
+        val me = game.me
+        me.shield = 10f
+        // You ride out to draw a line; the bot drives through it and bounces off.
+        drive(game, me.angle, 0.7f)
+        aimAt(game, bot, me, me.trail.size / 2)
+        game.steer(me.angle)
+        run(game, 0.5f)
+        assertTrue(me.alive)
+        assertTrue(game.events.any { it is GameEvent.Blocked })
+    }
+
+    @Test
+    fun yourCutKnocksOutEvenAShieldedBot() {
+        val (game, bot) = duelGame()
         bot.shield = 10f
         aimAt(game, game.me, bot, 1)
         run(game, 0.5f)
-        assertTrue(bot.alive)
-        assertTrue(game.events.any { it is GameEvent.Blocked })
+        assertFalse(bot.alive)
+        assertEquals(1, game.me.kills)
     }
 
     @Test
