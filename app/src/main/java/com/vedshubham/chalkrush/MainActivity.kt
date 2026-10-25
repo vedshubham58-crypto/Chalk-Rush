@@ -30,6 +30,8 @@ import com.vedshubham.chalkrush.ui.BonusScreen
 import com.vedshubham.chalkrush.ui.ChalkRushTheme
 import com.vedshubham.chalkrush.ui.GameScreen
 import com.vedshubham.chalkrush.ui.HomeScreen
+import com.vedshubham.chalkrush.ui.Music
+import com.vedshubham.chalkrush.ui.Track
 import com.vedshubham.chalkrush.ui.ProfileScreen
 import com.vedshubham.chalkrush.ui.ResultsScreen
 import com.vedshubham.chalkrush.ui.ReviveScreen
@@ -69,11 +71,22 @@ private fun AdBanner(ready: Boolean) {
 }
 
 class MainActivity : ComponentActivity() {
+    override fun onPause() {
+        super.onPause()
+        Music.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Music.onResume()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val store = Store(this)
         Sfx.init(this)
+        Music.init(this)
         Ads.setUp(this)
 
         setContent {
@@ -82,6 +95,8 @@ class MainActivity : ComponentActivity() {
                 val profile by store.profile.collectAsState()
                 val adsReady by Ads.ready.collectAsState()
                 Sfx.muted = profile.muted
+                Music.muted = profile.muted
+                Music.play(if (vm.screen == Screen.PLAYING || vm.screen == Screen.REVIVE) Track.RACE else Track.MENU)
 
                 fun startRound() {
                     vm.mapIndex = store.profile.value.currentMap
