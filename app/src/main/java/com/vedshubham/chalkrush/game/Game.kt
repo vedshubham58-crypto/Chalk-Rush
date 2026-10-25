@@ -12,9 +12,25 @@ import kotlin.random.Random
 const val NONE = -1
 
 /** Why a player was knocked out, for the results screen. */
-enum class Knockout { OWN_LINE, EDGE, LINE_CUT, LAND_TAKEN }
+enum class Knockout { LINE_CUT, LAND_TAKEN }
 
-class Player(val id: Int, val name: String, val isBot: Boolean) {
+enum class PowerType { SPEED, SHIELD, SPLASH }
+
+class PowerUp(val x: Int, val y: Int, val type: PowerType)
+
+/** Things that just happened, so the screen can play effects and sounds. */
+sealed interface GameEvent {
+    data object Go : GameEvent
+    data class Captured(val playerId: Int, val gained: Int, val x: Float, val y: Float) : GameEvent
+    data class KnockedOut(val victimId: Int, val killerId: Int?, val x: Float, val y: Float) : GameEvent
+    data class PickedUp(val playerId: Int, val type: PowerType, val x: Float, val y: Float) : GameEvent
+    data class Blocked(val playerId: Int, val x: Float, val y: Float) : GameEvent
+    data class Streak(val count: Int) : GameEvent
+}
+
+class Player(val id: Int, val character: Character, val isBot: Boolean) {
+    val name: String get() = if (isBot) character.name else "You"
+
     /** Position in cell units. Cell (i, j) covers [i, i+1) x [j, j+1). */
     var x = 0f
     var y = 0f
@@ -33,7 +49,13 @@ class Player(val id: Int, val name: String, val isBot: Boolean) {
     var knockedOutBy: String? = null
     var knockout: Knockout? = null
 
+    /** Seconds left on each power-up. */
+    var boost = 0f
+    var shield = 0f
+
     internal var brain: BotBrain? = null
+
+    val shielded get() = shield > 0f
 }
 
 data class FeedItem(val text: String, val at: Float)
@@ -41,12 +63,18 @@ data class FeedItem(val text: String, val at: Float)
 /**
  * The whole game: a square board of cells, each owned by at most one player,
  * plus everyone's chalk lines. Pure Kotlin so it can be tested without a phone.
+ *
+ * Only other players can knock you out, by touching your line while you're
+ * away from home. Crossing your own line is fine, and the edge is a wall.
  */
 class Game(
     val size: Int = 120,
     botCount: Int = 7,
     val roundSeconds: Float = 180f,
     seed: Long = System.nanoTime(),
+    myCharacter: Character = Characters.all[0],
+    countdownSeconds: Float = 3f,
+    private val powerUpsEnabled: Boolean = true,
 ) {
     val random = Random(seed)
     val cells get() = size * size
@@ -58,24 +86,41 @@ class Game(
     val trailOwner = IntArray(size * size) { NONE }
 
     val players: List<Player> = buildList {
-        add(Player(0, "You", isBot = false))
-        val names = BOT_NAMES.shuffled(random)
+        add(Player(0, myCharacter, isBot = false))
+        val others = Characters.all.filter { it.id != myCharacter.id }.shuffled(random)
         for (i in 1..botCount) {
-            add(Player(i, names[(i - 1) % names.size], isBot = true).also {
+            add(Player(i, others[(i - 1) % others.size], isBot = true).also {
                 it.brain = BotBrain(boldness = 0.7f + random.nextFloat() * 0.7f)
             })
         }
     }
     val me: Player get() = players[0]
 
+    val powerUps = ArrayList<PowerUp>()
+    private var powerUpIn = 2f
+
+    /** Seconds left in the 3-2-1 countdown before anyone moves. */
+    var countdown = countdownSeconds
+        private set
     var elapsed = 0f
         private set
     val timeLeft: Float get() = (roundSeconds - elapsed).coerceAtLeast(0f)
+    private var deadFor = 0f
 
-    /** True once the round ends or you are knocked out. */
-    val over: Boolean get() = elapsed >= roundSeconds || !me.alive
+    /** True once the round ends, or shortly after you are knocked out. */
+    val over: Boolean get() = elapsed >= roundSeconds || (!me.alive && deadFor >= DEATH_PAUSE)
 
     val feed = ArrayList<FeedItem>()
+
+    /** Effects to play. The screen empties this every frame. */
+    val events = ArrayList<GameEvent>()
+
+    /** Your knockouts in a row, each within [STREAK_SECONDS] of the last. */
+    var streak = 0
+        private set
+    var bestStreak = 0
+        private set
+    private var lastKillAt = -100f
 
     private val fillQueue = IntArray(size * size)
     private val fillMark = IntArray(size * size)
@@ -98,9 +143,16 @@ class Game(
     }
 
     fun update(dtRaw: Float) {
-        if (over) return
         val dt = dtRaw.coerceIn(0f, 0.05f)
+        if (countdown > 0f) {
+            countdown -= dt
+            if (countdown <= 0f) events.add(GameEvent.Go)
+            return
+        }
+        if (over) return
         elapsed += dt
+        if (!me.alive) deadFor += dt
+        if (powerUpsEnabled) spawnPowerUps(dt)
         for (p in players) {
             if (!p.alive) {
                 if (p.isBot) {
@@ -109,32 +161,52 @@ class Game(
                 }
                 continue
             }
+            p.boost = (p.boost - dt).coerceAtLeast(0f)
+            p.shield = (p.shield - dt).coerceAtLeast(0f)
             p.brain?.think(this, p, dt)
             turn(p, dt)
             move(p, dt)
         }
+        if (elapsed - lastKillAt > STREAK_SECONDS) streak = 0
         feed.removeAll { elapsed - it.at > 4f }
     }
+
+    fun speedOf(p: Player): Float {
+        var s = SPEED
+        if (p.character.perk == Perk.FASTER) s *= 1.1f
+        if (p.boost > 0f) s *= 1.6f
+        return s
+    }
+
+    fun turnRateOf(p: Player): Float =
+        if (p.character.perk == Perk.SHARP_TURNS) TURN_RATE * 1.3f else TURN_RATE
 
     private fun turn(p: Player, dt: Float) {
         var diff = (p.targetAngle - p.angle) % TWO_PI
         if (diff > PI) diff -= TWO_PI
         if (diff < -PI) diff += TWO_PI
-        val maxTurn = TURN_RATE * dt
+        val maxTurn = turnRateOf(p) * dt
         p.angle += if (abs(diff) <= maxTurn) diff else maxTurn * if (diff > 0) 1 else -1
     }
 
     private fun move(p: Player, dt: Float) {
-        val distance = SPEED * dt
+        val distance = speedOf(p) * dt
         val steps = ceil(distance / 0.4f).toInt().coerceAtLeast(1)
         val step = distance / steps
-        val dx = cos(p.angle) * step
-        val dy = sin(p.angle) * step
         repeat(steps) {
-            p.x += dx
-            p.y += dy
-            val cx = floor(p.x).toInt()
-            val cy = floor(p.y).toInt()
+            val nx = p.x + cos(p.angle) * step
+            val ny = p.y + sin(p.angle) * step
+            val cx = floor(nx).toInt()
+            val cy = floor(ny).toInt()
+            // The edge of the sidewalk is a wall: bounce off it.
+            if (cx !in 0 until size || cy !in 0 until size) {
+                if (cx !in 0 until size) p.angle = PI.toFloat() - p.angle
+                if (cy !in 0 until size) p.angle = -p.angle
+                p.targetAngle = p.angle
+                return
+            }
+            p.x = nx
+            p.y = ny
             if (cx != p.cellX || cy != p.cellY) {
                 // Moving diagonally: visit a side cell too, so lines never have
                 // corner-only gaps that a flood fill could leak through.
@@ -146,27 +218,27 @@ class Game(
 
     /** Steps [p] into cell (cx, cy). Returns false if they got knocked out. */
     private fun enter(p: Player, cx: Int, cy: Int): Boolean {
-        if (cx !in 0 until size || cy !in 0 until size) {
-            knockOut(p, null, Knockout.EDGE)
-            return false
-        }
         p.cellX = cx
         p.cellY = cy
         val i = cy * size + cx
         val lineOwner = trailOwner[i]
-        if (lineOwner == p.id) {
-            knockOut(p, null, Knockout.OWN_LINE)
-            return false
+        if (lineOwner != NONE && lineOwner != p.id) {
+            val victim = players[lineOwner]
+            if (victim.shielded) {
+                events.add(GameEvent.Blocked(victim.id, cx + 0.5f, cy + 0.5f))
+            } else {
+                knockOut(victim, p, Knockout.LINE_CUT)
+            }
         }
-        if (lineOwner != NONE) knockOut(players[lineOwner], p, Knockout.LINE_CUT)
 
         if (owner[i] == p.id) {
             if (p.trail.isNotEmpty()) capture(p)
-        } else {
+        } else if (trailOwner[i] == NONE) {
             trailOwner[i] = p.id
             p.trail.add(i)
         }
-        return true
+        if (powerUps.isNotEmpty()) pickUp(p)
+        return p.alive
     }
 
     private fun setOwner(i: Int, id: Int) {
@@ -179,6 +251,7 @@ class Game(
 
     /** [p] got back home: their line and everything it encloses becomes theirs. */
     private fun capture(p: Player) {
+        val before = p.land
         for (i in p.trail) {
             trailOwner[i] = NONE
             setOwner(i, p.id)
@@ -212,8 +285,12 @@ class Game(
         for (i in 0 until cells) {
             if (fillMark[i] != stamp && owner[i] != p.id) setOwner(i, p.id)
         }
-        p.bestLand = maxOf(p.bestLand, p.land)
+        afterLandGrab(p, before)
+    }
 
+    private fun afterLandGrab(p: Player, before: Int) {
+        p.bestLand = maxOf(p.bestLand, p.land)
+        events.add(GameEvent.Captured(p.id, p.land - before, p.x, p.y))
         for (other in players) {
             if (other.alive && other.id != p.id && other.land == 0) {
                 knockOut(other, p, Knockout.LAND_TAKEN)
@@ -232,24 +309,84 @@ class Game(
             for (i in 0 until cells) if (owner[i] == victim.id) setOwner(i, NONE)
         }
         victim.respawnIn = RESPAWN_SECONDS
+        victim.boost = 0f
+        victim.shield = 0f
+        events.add(GameEvent.KnockedOut(victim.id, by?.id, victim.x, victim.y))
         if (by != null) {
             by.kills++
             feed.add(FeedItem("${by.name} knocked out ${victim.name}", elapsed))
+            if (by.id == me.id) {
+                streak = if (elapsed - lastKillAt <= STREAK_SECONDS) streak + 1 else 1
+                lastKillAt = elapsed
+                bestStreak = maxOf(bestStreak, streak)
+                if (streak >= 2) events.add(GameEvent.Streak(streak))
+            }
         }
+    }
+
+    private fun spawnPowerUps(dt: Float) {
+        powerUpIn -= dt
+        if (powerUpIn > 0f) return
+        powerUpIn = POWER_UP_EVERY
+        if (powerUps.size >= MAX_POWER_UPS) return
+        repeat(40) {
+            val x = 3 + random.nextInt(size - 6)
+            val y = 3 + random.nextInt(size - 6)
+            val i = y * size + x
+            if (owner[i] == NONE && trailOwner[i] == NONE) {
+                powerUps.add(PowerUp(x, y, PowerType.entries[random.nextInt(PowerType.entries.size)]))
+                return
+            }
+        }
+    }
+
+    private fun pickUp(p: Player) {
+        val it = powerUps.iterator()
+        while (it.hasNext()) {
+            val pu = it.next()
+            if (abs(pu.x - p.cellX) > 1 || abs(pu.y - p.cellY) > 1) continue
+            it.remove()
+            val longer = if (p.character.perk == Perk.LONG_POWERUPS) 1.5f else 1f
+            events.add(GameEvent.PickedUp(p.id, pu.type, pu.x + 0.5f, pu.y + 0.5f))
+            when (pu.type) {
+                PowerType.SPEED -> p.boost = 3f * longer
+                PowerType.SHIELD -> p.shield = 5f * longer
+                PowerType.SPLASH -> splash(p)
+            }
+            return
+        }
+    }
+
+    /** Paints a blob of land around [p] in one go. */
+    private fun splash(p: Player) {
+        val r = if (p.character.perk == Perk.BIG_SPLASH) 6 else 4
+        val before = p.land
+        for (y in p.cellY - r..p.cellY + r) for (x in p.cellX - r..p.cellX + r) {
+            if (!inBounds(x, y)) continue
+            val dx = x - p.cellX
+            val dy = y - p.cellY
+            if (dx * dx + dy * dy > r * r) continue
+            val i = y * size + x
+            if (trailOwner[i] == p.id) continue
+            setOwner(i, p.id)
+        }
+        // Now standing on own land: the line drawn so far closes a loop too.
+        if (p.trail.isNotEmpty()) capture(p) else afterLandGrab(p, before)
     }
 
     /** Puts [p] on the board with a small square of starting land. */
     private fun spawn(p: Player) {
-        val margin = START_RADIUS + 4
+        val radius = if (p.character.perk == Perk.BIG_START) START_RADIUS + 1 else START_RADIUS
+        val margin = radius + 4
         var cx = 0
         var cy = 0
         for (attempt in 0 until 300) {
             cx = margin + random.nextInt(size - 2 * margin)
             cy = margin + random.nextInt(size - 2 * margin)
-            if (areaIsFree(cx, cy, START_RADIUS + 2)) break
+            if (areaIsFree(cx, cy, radius + 2)) break
         }
-        for (y in cy - START_RADIUS..cy + START_RADIUS) {
-            for (x in cx - START_RADIUS..cx + START_RADIUS) {
+        for (y in cy - radius..cy + radius) {
+            for (x in cx - radius..cx + radius) {
                 val i = y * size + x
                 val line = trailOwner[i]
                 if (line != NONE && line != p.id) knockOut(players[line], p, Knockout.LINE_CUT)
@@ -265,6 +402,8 @@ class Game(
         p.alive = true
         p.knockout = null
         p.knockedOutBy = null
+        p.boost = 0f
+        p.shield = if (p.character.perk == Perk.SHIELD_START) 5f else SPAWN_SHIELD
         p.bestLand = maxOf(p.bestLand, p.land)
         p.brain?.reset()
     }
@@ -298,68 +437,6 @@ class Game(
         return null
     }
 
-    private val pathParent = IntArray(size * size)
-
-    /**
-     * A cell a few steps along the shortest way home for [p] that doesn't cross
-     * their own line, or null if home is out of reach within [maxVisits] cells.
-     * Prefers a path that keeps a one-cell gap from the line, because players
-     * can't turn on the spot.
-     */
-    internal fun wayHome(p: Player, maxVisits: Int = 5000): Pair<Int, Int>? =
-        searchHome(p, maxVisits, keepGap = true) ?: searchHome(p, maxVisits, keepGap = false)
-
-    private fun searchHome(p: Player, maxVisits: Int, keepGap: Boolean): Pair<Int, Int>? {
-        val start = p.cellY * size + p.cellX
-        val stamp = ++fillStamp
-        var head = 0
-        var tail = 0
-        fillMark[start] = stamp
-        pathParent[start] = -1
-        fillQueue[tail++] = start
-        var found = -1
-        while (head < tail && tail < maxVisits) {
-            val i = fillQueue[head++]
-            if (owner[i] == p.id) {
-                found = i
-                break
-            }
-            val x = i % size
-            for (n in intArrayOf(
-                if (x > 0) i - 1 else -1,
-                if (x < size - 1) i + 1 else -1,
-                if (i >= size) i - size else -1,
-                if (i < cells - size) i + size else -1,
-            )) {
-                if (n < 0 || fillMark[n] == stamp || trailOwner[n] == p.id) continue
-                if (keepGap && owner[n] != p.id && nextToLine(p, n) &&
-                    (abs(n % size - p.cellX) > 2 || abs(n / size - p.cellY) > 2)
-                ) continue
-                fillMark[n] = stamp
-                pathParent[n] = i
-                fillQueue[tail++] = n
-            }
-        }
-        if (found < 0) return null
-        val path = ArrayList<Int>()
-        var c = found
-        while (c != -1) {
-            path.add(c)
-            c = pathParent[c]
-        }
-        val aim = path[(path.size - 1 - 4).coerceAtLeast(0)]
-        return aim % size to aim / size
-    }
-
-    private fun nextToLine(p: Player, i: Int): Boolean {
-        val x = i % size
-        val y = i / size
-        for (yy in y - 1..y + 1) for (xx in x - 1..x + 1) {
-            if (inBounds(xx, yy) && trailOwner[yy * size + xx] == p.id) return true
-        }
-        return false
-    }
-
     companion object {
         /** Cells per second. */
         const val SPEED = 7f
@@ -368,11 +445,11 @@ class Game(
         const val TURN_RATE = 6f
         const val START_RADIUS = 2
         const val RESPAWN_SECONDS = 3f
+        const val SPAWN_SHIELD = 2f
+        const val STREAK_SECONDS = 8f
+        const val DEATH_PAUSE = 1.5f
+        const val POWER_UP_EVERY = 4f
+        const val MAX_POWER_UPS = 8
         const val TWO_PI = (2 * PI).toFloat()
-
-        val BOT_NAMES = listOf(
-            "Zigzag", "Doodle", "Smudge", "Scribble", "Pebble", "Hopscotch",
-            "Crayon", "Squiggle", "Dusty", "Sketch", "Loopy", "Swirl",
-        )
     }
 }

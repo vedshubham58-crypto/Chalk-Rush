@@ -9,7 +9,8 @@ import kotlin.math.sin
 
 /**
  * Simple rules for a computer player: leave home, draw a box-shaped loop,
- * run home when someone gets close, and cut enemy lines that are in reach.
+ * run home when someone gets close, grab nearby power-ups, and cut enemy
+ * lines that are in reach.
  * [boldness] above 1 means longer trips and more attacks.
  */
 internal class BotBrain(private val boldness: Float) {
@@ -44,16 +45,14 @@ internal class BotBrain(private val boldness: Float) {
 
         var desired = me.targetAngle
         if (!atHome) {
-            val nearest = game.nearestOwnCell(me)
-            val homeDist = nearest?.let { dist(me, it.first, it.second) } ?: 0f
-            val home = if (nearest == null) null else game.wayHome(me) ?: nearest
-            if (home != null && (goingHome || danger(game, me) < homeDist + 4f ||
-                    me.trail.size > 45 * boldness)
-            ) {
+            val home = game.nearestOwnCell(me)
+            val homeDist = home?.let { dist(me, it.first, it.second) } ?: 0f
+            val scared = !me.shielded && danger(game, me) < homeDist + 4f
+            if (home != null && (goingHome || scared || me.trail.size > 45 * boldness)) {
                 goingHome = true
                 desired = angleTo(me, home.first, home.second)
             } else {
-                attackTarget(game, me)?.let { desired = it } ?: run {
+                (attackTarget(game, me) ?: powerUpTarget(game, me))?.let { desired = it } ?: run {
                     if (legTime <= 0f) {
                         legsLeft--
                         if (legsLeft <= 0) {
@@ -100,7 +99,7 @@ internal class BotBrain(private val boldness: Float) {
     private fun attackTarget(game: Game, me: Player): Float? {
         if (boldness < 0.9f) return null
         for (other in game.players) {
-            if (!other.alive || other.id == me.id || other.trail.isEmpty()) continue
+            if (!other.alive || other.id == me.id || other.trail.isEmpty() || other.shielded) continue
             for (i in other.trail) {
                 val x = i % game.size
                 val y = i / game.size
@@ -109,6 +108,12 @@ internal class BotBrain(private val boldness: Float) {
             }
         }
         return null
+    }
+
+    /** Angle toward a power-up that's close by. */
+    private fun powerUpTarget(game: Game, me: Player): Float? {
+        val near = game.powerUps.minByOrNull { dist(me, it.x, it.y) } ?: return null
+        return if (dist(me, near.x, near.y) < 8f) angleTo(me, near.x, near.y) else null
     }
 
     /** The angle nearest to [desired] that doesn't run into my own line or the edge soon. */
@@ -129,8 +134,9 @@ internal class BotBrain(private val boldness: Float) {
 
     /**
      * Plays the next few cells forward, turning toward [target] as fast as a
-     * player can, and returns how far the bot gets before hitting its own line
-     * or the edge ([LOOKAHEAD] if it doesn't). Getting home counts as safe.
+     * player can, and returns how far the bot gets before crossing its own line
+     * or reaching the edge ([LOOKAHEAD] if it doesn't). Crossing is allowed but
+     * makes messy loops, so bots avoid it. Getting home counts as safe.
      */
     private fun roomAhead(game: Game, me: Player, target: Float): Float {
         var x = me.x
@@ -139,7 +145,7 @@ internal class BotBrain(private val boldness: Float) {
         var cx = me.cellX
         var cy = me.cellY
         val step = 0.35f
-        val maxTurn = Game.TURN_RATE * step / Game.SPEED
+        val maxTurn = game.turnRateOf(me) * step / game.speedOf(me)
         var travelled = 0f
         while (travelled < LOOKAHEAD) {
             var diff = (target - angle) % Game.TWO_PI

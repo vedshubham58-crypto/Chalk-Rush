@@ -1,5 +1,6 @@
 package com.vedshubham.chalkrush.ui
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -27,8 +28,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
@@ -40,19 +46,167 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.vedshubham.chalkrush.game.Game
+import com.vedshubham.chalkrush.game.GameEvent
 import com.vedshubham.chalkrush.game.NONE
+import com.vedshubham.chalkrush.game.Player
+import com.vedshubham.chalkrush.game.PowerType
 import kotlin.math.atan2
 import kotlin.math.ceil
+import kotlin.math.cos
 import kotlin.math.floor
+import kotlin.math.hypot
+import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
-/** How many cells fit across the screen. */
-private const val VIEW_CELLS = 24f
+private val SpeedColor = Color(0xFFFFD23F)
+private val ShieldColor = Color(0xFF5CE1FF)
+private val SplashColor = Color(0xFFFF4FB8)
+
+private class Particle(
+    var x: Float, var y: Float, val vx: Float, val vy: Float,
+    var life: Float, val maxLife: Float, val color: Color, val size: Float,
+)
+
+private class Popup(val text: String, val x: Float, val y: Float, val color: Color, var age: Float = 0f)
+
+/** Everything on screen that isn't part of the game rules: camera, particles, pop-ups. */
+private class Effects {
+    var clock = 0f
+    var camX = Float.NaN
+    var camY = 0f
+    var viewCells = 22f
+    var shake = 0f
+    val particles = ArrayList<Particle>()
+    val popups = ArrayList<Popup>()
+    var banner: String? = null
+    var bannerColor = Color.White
+    var bannerAge = 0f
+    var happyFor = 0f
+    var lastCount = 4
+    val rng = Random(11)
+
+    fun burst(x: Float, y: Float, color: Color, count: Int, speed: Float) {
+        repeat(count) {
+            val a = rng.nextFloat() * 6.283f
+            val s = speed * (0.3f + rng.nextFloat())
+            val life = 0.4f + rng.nextFloat() * 0.5f
+            particles.add(Particle(x, y, cos(a) * s, sin(a) * s, life, life, color, 0.12f + rng.nextFloat() * 0.18f))
+        }
+        while (particles.size > 500) particles.removeAt(0)
+    }
+
+    fun show(text: String, color: Color) {
+        banner = text
+        bannerColor = color
+        bannerAge = 0f
+    }
+
+    fun step(dt: Float) {
+        clock += dt
+        shake = (shake - dt * 3f).coerceAtLeast(0f)
+        happyFor = (happyFor - dt).coerceAtLeast(0f)
+        bannerAge += dt
+        if (bannerAge > 1.4f) banner = null
+        val pi = particles.iterator()
+        while (pi.hasNext()) {
+            val p = pi.next()
+            p.life -= dt
+            if (p.life <= 0f) pi.remove() else {
+                p.x += p.vx * dt
+                p.y += p.vy * dt
+            }
+        }
+        popups.forEach { it.age += dt }
+        popups.removeAll { it.age > 1.1f }
+    }
+}
 
 @Composable
 fun GameScreen(game: Game, onRoundOver: () -> Unit) {
     var frame by remember { mutableIntStateOf(0) }
+    val fx = remember(game) { Effects() }
+    val view = LocalView.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+
+    fun buzz(strong: Boolean) {
+        view.performHapticFeedback(if (strong) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.KEYBOARD_TAP)
+    }
+
+    fun handle(e: GameEvent) {
+        val me = game.me
+        when (e) {
+            GameEvent.Go -> {
+                Sfx.play(Sound.GO)
+                fx.show("GO!", SpeedColor)
+            }
+            is GameEvent.Captured -> {
+                val color = colorOf(game.players[e.playerId].character.id).fill
+                if (e.playerId == me.id && e.gained > 0) {
+                    val pct = e.gained * 100f / game.cells
+                    fx.popups.add(Popup("+%.1f%%".format(pct), e.x, e.y - 1f, Color.White))
+                    fx.burst(e.x, e.y, color, 30 + e.gained.coerceAtMost(200) / 4, 6f)
+                    fx.happyFor = 1.2f
+                    Sfx.play(if (e.gained > 150) Sound.CAPTURE_BIG else Sound.CAPTURE)
+                    if (e.gained > 300) fx.show("HUGE!", color)
+                    buzz(false)
+                }
+            }
+            is GameEvent.KnockedOut -> {
+                val victim = game.players[e.victimId]
+                fx.burst(e.x, e.y, colorOf(victim.character.id).fill, 50, 9f)
+                fx.burst(e.x, e.y, Color.White, 20, 5f)
+                when {
+                    e.victimId == me.id -> {
+                        fx.shake = 1f
+                        Sfx.play(Sound.LOSE)
+                        fx.show("KO!", Color(0xFFFF5A5A))
+                        buzz(true)
+                    }
+                    e.killerId == me.id -> {
+                        fx.shake = 0.6f
+                        fx.popups.add(Popup("Knockout!", e.x, e.y - 1f, SpeedColor))
+                        Sfx.play(Sound.KNOCKOUT)
+                        if (game.streak < 2) fx.show("KO!", SpeedColor)
+                        buzz(true)
+                    }
+                    hypot(e.x - me.x, e.y - me.y) < 18f -> Sfx.play(Sound.KNOCKOUT, volume = 0.35f)
+                }
+            }
+            is GameEvent.PickedUp -> {
+                val color = powerColor(e.type)
+                fx.burst(e.x, e.y, color, 24, 5f)
+                if (e.playerId == me.id) {
+                    val label = when (e.type) {
+                        PowerType.SPEED -> "Speed!"
+                        PowerType.SHIELD -> "Shield!"
+                        PowerType.SPLASH -> "Splash!"
+                    }
+                    fx.popups.add(Popup(label, e.x, e.y - 1f, color))
+                    Sfx.play(Sound.POWER_UP)
+                    buzz(false)
+                }
+            }
+            is GameEvent.Blocked -> {
+                fx.burst(e.x, e.y, ShieldColor, 16, 4f)
+                if (e.playerId == me.id) {
+                    fx.popups.add(Popup("Blocked!", e.x, e.y - 1f, ShieldColor))
+                    Sfx.play(Sound.BLOCK)
+                }
+            }
+            is GameEvent.Streak -> {
+                fx.show(
+                    when (e.count) {
+                        2 -> "DOUBLE KO!"
+                        3 -> "TRIPLE KO!"
+                        else -> "UNSTOPPABLE!"
+                    },
+                    Color(0xFFFF9F1C),
+                )
+                fx.shake = 0.9f
+            }
+        }
+    }
 
     // The game loop: runs every screen frame, pauses while the app is in the background.
     LaunchedEffect(game) {
@@ -60,8 +214,28 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
             var last = 0L
             while (!game.over) {
                 withFrameNanos { now ->
-                    if (last != 0L) game.update((now - last) / 1_000_000_000f)
+                    val dt = if (last == 0L) 0f else ((now - last) / 1_000_000_000f).coerceAtMost(0.05f)
                     last = now
+                    game.update(dt)
+                    for (e in game.events) handle(e)
+                    game.events.clear()
+                    val count = ceil(game.countdown).toInt()
+                    if (count in 1..3 && count != fx.lastCount) {
+                        fx.lastCount = count
+                        Sfx.play(Sound.BEEP)
+                    }
+                    // Chalk dust behind fast movers.
+                    val me = game.me
+                    if (me.alive && game.countdown <= 0f && fx.rng.nextFloat() < if (me.boost > 0f) 0.9f else 0.25f) {
+                        fx.particles.add(
+                            Particle(
+                                me.x - cos(me.angle) * 0.5f, me.y - sin(me.angle) * 0.5f,
+                                (fx.rng.nextFloat() - 0.5f), (fx.rng.nextFloat() - 0.5f),
+                                0.5f, 0.5f, if (me.boost > 0f) SpeedColor else Color.White.copy(alpha = 0.7f), 0.16f,
+                            ),
+                        )
+                    }
+                    fx.step(dt)
                 }
                 frame++
             }
@@ -75,9 +249,16 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
     }
     val textMeasurer = rememberTextMeasurer()
     val names = remember(game) {
-        val style = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        val style = TextStyle(
+            color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(1f, 2f), 3f),
+        )
         game.players.map { textMeasurer.measure(it.name, style) }
     }
+    val popupStyle = TextStyle(
+        fontSize = 20.sp, fontWeight = FontWeight.Black,
+        shadow = Shadow(Color.Black.copy(alpha = 0.7f), Offset(2f, 3f), 4f),
+    )
 
     Box(
         Modifier
@@ -102,29 +283,107 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
     ) {
         Canvas(Modifier.fillMaxSize()) {
             frame // redraw every frame
-            val cell = size.width / VIEW_CELLS
             val me = game.me
-            val ox = size.width / 2 - me.x * cell
-            val oy = size.height / 2 - me.y * cell
+            // Smooth camera that zooms out as your land grows, with a little shake.
+            val targetView = (22f + sqrt(me.land.toFloat()) * 0.12f).coerceAtMost(34f)
+            fx.viewCells += (targetView - fx.viewCells) * 0.05f
+            if (fx.camX.isNaN()) {
+                fx.camX = me.x
+                fx.camY = me.y
+            }
+            fx.camX += (me.x - fx.camX) * 0.18f
+            fx.camY += (me.y - fx.camY) * 0.18f
+            val cell = size.width / fx.viewCells
+            val shake = fx.shake * fx.shake * cell * 0.6f
+            val ox = size.width / 2 - fx.camX * cell + (fx.rng.nextFloat() - 0.5f) * shake
+            val oy = size.height / 2 - fx.camY * cell + (fx.rng.nextFloat() - 0.5f) * shake
+
             drawBoard(game, cell, ox, oy, specks)
+            drawPowerUps(game, cell, ox, oy, fx.clock)
+
+            for (p in fx.particles) {
+                val a = (p.life / p.maxLife).coerceIn(0f, 1f)
+                drawCircle(p.color.copy(alpha = p.color.alpha * a), p.size * cell * (0.5f + a * 0.5f), Offset(ox + p.x * cell, oy + p.y * cell))
+            }
+
             for (p in game.players) {
-                if (!p.alive) continue
+                if (!p.alive && !(p.id == me.id)) continue
                 val center = Offset(ox + p.x * cell, oy + p.y * cell)
                 if (center.x < -cell * 4 || center.x > size.width + cell * 4 ||
                     center.y < -cell * 4 || center.y > size.height + cell * 4
                 ) continue
-                val color = colorOf(p.id)
-                drawCircle(color.edge, radius = cell * 0.62f, center = center + Offset(0f, cell * 0.18f))
-                drawCircle(color.fill, radius = cell * 0.55f, center = center)
-                drawCircle(Color.White.copy(alpha = 0.7f), radius = cell * 0.2f, center = center - Offset(cell * 0.15f, cell * 0.15f))
+                val bob = sin(fx.clock * 10f + p.id) * cell * 0.05f
+                val c = center + Offset(0f, bob)
+                val radius = cell * 0.8f
+                if (p.boost > 0f) {
+                    for (k in 1..3) {
+                        val back = c - Offset(cos(p.angle), sin(p.angle)) * (cell * 0.6f * k)
+                        drawCircle(SpeedColor.copy(alpha = 0.35f / k), radius * (1f - k * 0.15f), back)
+                    }
+                }
+                drawCharacter(p.character.id, c, radius, p.angle, moodOf(game, p, fx), fx.clock)
+                if (p.shielded) {
+                    val pulse = 0.5f + 0.3f * sin(fx.clock * 8f)
+                    drawCircle(ShieldColor.copy(alpha = 0.18f), radius * 1.45f, c)
+                    drawCircle(ShieldColor.copy(alpha = pulse), radius * 1.45f, c, style = Stroke(cell * 0.12f))
+                }
                 val label = names[p.id]
-                drawText(
-                    label,
-                    topLeft = Offset(center.x - label.size.width / 2f, center.y - cell * 0.9f - label.size.height),
-                )
+                drawText(label, topLeft = Offset(c.x - label.size.width / 2f, c.y - radius * 1.6f - label.size.height))
+            }
+
+            for (pop in fx.popups) {
+                val t = pop.age / 1.1f
+                val layout = textMeasurer.measure(pop.text, popupStyle.copy(color = pop.color.copy(alpha = 1f - t * t)))
+                val x = ox + pop.x * cell - layout.size.width / 2f
+                val y = oy + (pop.y - t * 1.8f) * cell - layout.size.height
+                drawText(layout, topLeft = Offset(x, y))
             }
         }
-        Hud(game, tick = frame / 6)
+        Hud(game, fx, tick = frame)
+    }
+}
+
+private fun moodOf(game: Game, p: Player, fx: Effects): Mood {
+    if (!p.alive) return Mood.KNOCKED_OUT
+    if (p.id == game.me.id && fx.happyFor > 0f) return Mood.HAPPY
+    if (p.boost > 0f) return Mood.HAPPY
+    if (p.trail.size > 25 && !p.shielded) return Mood.SCARED
+    return Mood.NORMAL
+}
+
+private fun powerColor(t: PowerType) = when (t) {
+    PowerType.SPEED -> SpeedColor
+    PowerType.SHIELD -> ShieldColor
+    PowerType.SPLASH -> SplashColor
+}
+
+private fun DrawScope.drawPowerUps(game: Game, cell: Float, ox: Float, oy: Float, clock: Float) {
+    for (pu in game.powerUps) {
+        val bob = sin(clock * 4f + pu.x) * cell * 0.15f
+        val c = Offset(ox + (pu.x + 0.5f) * cell, oy + (pu.y + 0.5f) * cell + bob)
+        if (c.x < -cell * 2 || c.x > size.width + cell * 2 || c.y < -cell * 2 || c.y > size.height + cell * 2) continue
+        val color = powerColor(pu.type)
+        val r = cell * 0.75f
+        drawCircle(color.copy(alpha = 0.25f + 0.1f * sin(clock * 6f)), r * 1.5f, c)
+        drawCircle(Color.Black.copy(alpha = 0.2f), r, c + Offset(0f, cell * 0.2f))
+        drawCircle(color, r, c)
+        drawCircle(Color.White, r, c, style = Stroke(cell * 0.1f))
+        when (pu.type) {
+            PowerType.SPEED -> {
+                val s = r * 0.55f
+                drawLine(Color.White, c + Offset(s * 0.3f, -s), c + Offset(-s * 0.3f, s * 0.1f), cell * 0.14f, StrokeCap.Round)
+                drawLine(Color.White, c + Offset(-s * 0.3f, s * 0.1f), c + Offset(s * 0.3f, -s * 0.1f), cell * 0.14f, StrokeCap.Round)
+                drawLine(Color.White, c + Offset(s * 0.3f, -s * 0.1f), c + Offset(-s * 0.3f, s), cell * 0.14f, StrokeCap.Round)
+            }
+            PowerType.SHIELD -> drawCircle(Color.White, r * 0.45f, c, style = Stroke(cell * 0.12f))
+            PowerType.SPLASH -> {
+                drawCircle(Color.White, r * 0.3f, c)
+                for (k in 0 until 5) {
+                    val a = k * 1.2566f + clock
+                    drawCircle(Color.White, r * 0.12f, c + Offset(cos(a), sin(a)) * (r * 0.55f))
+                }
+            }
+        }
     }
 }
 
@@ -141,6 +400,8 @@ private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, s
         drawLine(ConcreteJoint, Offset(ox + k * cell, oy), Offset(ox + k * cell, oy + n * cell), strokeWidth = cell * 0.12f)
         drawLine(ConcreteJoint, Offset(ox, oy + k * cell), Offset(ox + n * cell, oy + k * cell), strokeWidth = cell * 0.12f)
     }
+    // A painted kerb around the edge, so it's clear you bounce off it.
+    drawRect(Color(0xFFFFE066), topLeft = Offset(ox - cell * 0.4f, oy - cell * 0.4f), size = Size((n + 0.8f) * cell, (n + 0.8f) * cell), style = Stroke(cell * 0.4f))
 
     val x0 = floor(-ox / cell).toInt().coerceAtLeast(0)
     val x1 = ceil((size.width - ox) / cell).toInt().coerceAtMost(n - 1)
@@ -160,7 +421,7 @@ private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, s
                 }
                 var end = x
                 while (end + 1 <= x1 && game.owner[y * n + end + 1] == o) end++
-                val color = colorOf(o)
+                val color = colorOf(game.players[o].character.id)
                 val top = oy + y * cell + if (pass == 0) cell * 0.25f else 0f
                 drawRect(
                     if (pass == 0) color.edge else color.fill,
@@ -172,21 +433,20 @@ private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, s
         }
     }
 
-    // Chalk lines still being drawn.
+    // Chalk lines still being drawn: round chalk dabs.
     for (y in y0..y1) for (x in x0..x1) {
         val t = game.trailOwner[y * n + x]
         if (t == NONE) continue
-        drawRect(
-            colorOf(t).fill.copy(alpha = 0.75f),
-            topLeft = Offset(ox + x * cell + cell * 0.15f, oy + y * cell + cell * 0.15f),
-            size = Size(cell * 0.7f, cell * 0.7f),
-        )
+        val color = colorOf(game.players[t].character.id)
+        val c = Offset(ox + (x + 0.5f) * cell, oy + (y + 0.5f) * cell)
+        drawCircle(color.edge.copy(alpha = 0.6f), cell * 0.5f, c + Offset(0f, cell * 0.1f))
+        drawCircle(color.fill, cell * 0.45f, c)
     }
 }
 
 @Composable
-private fun Hud(game: Game, tick: Int) {
-    tick // refresh about 10 times a second
+private fun Hud(game: Game, fx: Effects, tick: Int) {
+    tick // refresh every frame
     val pill = Modifier
         .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
         .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -194,23 +454,23 @@ private fun Hud(game: Game, tick: Int) {
         val left = ceil(game.timeLeft).toInt()
         Text(
             "%d:%02d".format(left / 60, left % 60),
-            color = Color.White,
+            color = if (left <= 10) Color(0xFFFF6B6B) else Color.White,
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             modifier = pill.align(Alignment.TopStart),
         )
 
-        Column(pill.align(Alignment.TopEnd).width(150.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(pill.align(Alignment.TopEnd).width(160.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val ranking = game.ranking()
             val shown = ranking.take(5).toMutableList()
             if (game.me !in shown) shown[shown.lastIndex] = game.me
             for (p in shown) {
                 val place = ranking.indexOf(p) + 1
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(10.dp).background(colorOf(p.id).fill, CircleShape))
+                    Box(Modifier.size(10.dp).background(colorOf(p.character.id).fill, CircleShape))
                     Text(
-                        "  $place. ${if (p.isBot) "🤖 " else ""}${p.name}",
-                        color = Color.White,
+                        "  $place. ${p.name}",
+                        color = if (p.isBot) Color.White else SpeedColor,
                         fontSize = 13.sp,
                         fontWeight = if (p.isBot) FontWeight.Normal else FontWeight.Bold,
                         maxLines = 1,
@@ -219,6 +479,7 @@ private fun Hud(game: Game, tick: Int) {
                     Text("%.1f%%".format(game.percent(p)), color = Color.White, fontSize = 13.sp)
                 }
             }
+            Text("Computer players", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp)
         }
 
         Column(
@@ -231,9 +492,36 @@ private fun Hud(game: Game, tick: Int) {
             }
         }
 
-        if (game.elapsed < 5f) {
+        // Big centre text: countdown, GO!, KO! and streaks.
+        val count = ceil(game.countdown).toInt()
+        val (big, bigColor, age) = when {
+            count > 0 -> Triple(count.toString(), Color.White, 1f - (game.countdown - (count - 1)))
+            fx.banner != null -> Triple(fx.banner!!, fx.bannerColor, fx.bannerAge)
+            else -> Triple(null, Color.White, 0f)
+        }
+        if (big != null) {
+            val pop = if (age < 0.15f) 0.6f + age / 0.15f * 0.6f else 1.2f - ((age - 0.15f) * 0.2f).coerceAtMost(0.2f)
+            val alpha = if (count > 0) 1f else (1f - ((age - 1f) / 0.4f).coerceIn(0f, 1f))
             Text(
-                "Swipe to steer.\nLeave your land, draw a loop, and come back to claim it.\nDon't let anyone touch your line!",
+                big,
+                color = bigColor.copy(alpha = alpha),
+                fontSize = 64.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                style = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.6f), Offset(4f, 6f), 8f)),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(bottom = 160.dp)
+                    .graphicsLayer {
+                        scaleX = pop
+                        scaleY = pop
+                    },
+            )
+        }
+
+        if (game.countdown > 0f) {
+            Text(
+                "Swipe to steer.\nLeave your land, draw a loop, and come back to claim it.\nTouch other lines to knock players out!",
                 color = Color.White,
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
@@ -241,12 +529,19 @@ private fun Hud(game: Game, tick: Int) {
             )
         }
 
-        Text(
-            "You  %.1f%%".format(game.percent(game.me)),
-            color = Color.White,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Black,
-            modifier = pill.align(Alignment.BottomCenter),
-        )
+        Row(
+            Modifier.align(Alignment.BottomCenter).then(pill),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "You  %.1f%%".format(game.percent(game.me)),
+                color = Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+            )
+            if (game.me.boost > 0f) Text("⚡", fontSize = 20.sp)
+            if (game.me.shielded) Text("🛡", fontSize = 20.sp)
+        }
     }
 }
