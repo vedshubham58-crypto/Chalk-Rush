@@ -1,10 +1,7 @@
 package com.vedshubham.chalkrush.game
 
 import kotlin.math.PI
-import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.floor
-import kotlin.math.sin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -27,29 +24,49 @@ class GameTest {
 
     private fun soloGame() = Game(size = 60, botCount = 0, seed = 1, countdownSeconds = 0f, powerUpsEnabled = false)
 
-    /** One bot that just walks straight ahead, for testing line cuts. */
+    /** Turns right at every cell centre, riding a tiny square inside home. */
+    private fun circleHome(game: Game) = game.steer(game.me.angle + Game.HALF_PI)
+
+    /** Puts [p] on the centre of cell [i], heading in grid direction [dir]. */
+    private fun placeAt(game: Game, p: Player, i: Int, dir: Int) {
+        p.cellX = i % game.size
+        p.cellY = i / game.size
+        p.x = p.cellX + 0.5f
+        p.y = p.cellY + 0.5f
+        p.dir = dir
+        p.targetAngle = p.angle
+    }
+
+    /** The grid direction from cell [a] to the neighbouring cell [b]. */
+    private fun dirBetween(game: Game, a: Int, b: Int): Int {
+        val dx = b % game.size - a % game.size
+        val dy = b / game.size - a / game.size
+        return (0 until 4).first { Game.DX[it] == dx && Game.DY[it] == dy }
+    }
+
+    /** Puts [hunter] two cells beside [victim]'s line, riding straight at it. */
+    private fun aimAt(game: Game, hunter: Player, victim: Player, k: Int) {
+        val i = victim.trail[k]
+        val side = (dirBetween(game, victim.trail[k - 1], i) + 1) % 4
+        val start = (i % game.size - 2 * Game.DX[side]) + (i / game.size - 2 * Game.DY[side]) * game.size
+        placeAt(game, hunter, start, side)
+        if (hunter.id == game.me.id) game.steer(hunter.angle)
+    }
+
+    /** Faces "you" right, sitting on the centre of your start square. */
+    private fun faceRight(game: Game) {
+        val me = game.me
+        placeAt(game, me, me.cellY * game.size + me.cellX, 0)
+    }
+
+    /** One bot that just rides straight ahead, for testing line cuts. */
     private fun duelGame(): Pair<Game, Player> {
         val game = Game(size = 60, botCount = 1, seed = 2, countdownSeconds = 0f, powerUpsEnabled = false)
         val bot = game.players[1]
         bot.brain = null
-        game.steer(game.me.angle + 1f)
-        run(game, 1f) { game.steer(game.me.angle + 1f) }
+        run(game, 1f) { circleHome(game) }
         assertTrue("bot should be out drawing a line", bot.trail.size >= 3)
         return game to bot
-    }
-
-    /** Puts "you" next to the bot's line, heading straight at it. */
-    private fun aimAtLine(game: Game, bot: Player) {
-        val i = bot.trail[1]
-        val tx = i % game.size + 0.5f
-        val ty = i / game.size + 0.5f
-        val me = game.me
-        me.x = tx - sin(bot.angle) * 1.6f
-        me.y = ty + cos(bot.angle) * 1.6f
-        me.cellX = floor(me.x).toInt()
-        me.cellY = floor(me.y).toInt()
-        me.angle = atan2(ty - me.y, tx - me.x)
-        game.steer(me.angle)
     }
 
     @Test
@@ -73,6 +90,7 @@ class GameTest {
     @Test
     fun drawingALoopCapturesTheInside() {
         val game = soloGame()
+        faceRight(game)
         val start = game.me.land
         drive(game, 0f, 1f) // right
         drive(game, (PI / 2).toFloat(), 1f) // down
@@ -87,6 +105,7 @@ class GameTest {
     @Test
     fun crossingYourOwnLineIsSafe() {
         val game = soloGame()
+        faceRight(game)
         drive(game, 0f, 1f)
         drive(game, (PI / 2).toFloat(), 0.6f)
         drive(game, PI.toFloat(), 0.4f)
@@ -97,16 +116,18 @@ class GameTest {
     @Test
     fun theEdgeIsAWall() {
         val game = soloGame()
+        faceRight(game)
         drive(game, 0f, 20f)
         assertTrue(game.me.alive)
         assertTrue(game.me.x in 0f..game.size.toFloat())
+        assertTrue(game.me.y in 0f..game.size.toFloat())
     }
 
     @Test
     fun touchingSomeoneElsesLineKnocksThemOut() {
         val (game, bot) = duelGame()
         bot.shield = 0f
-        aimAtLine(game, bot)
+        aimAt(game, game.me, bot, 1)
         run(game, 0.5f)
         assertFalse(bot.alive)
         assertEquals(1, game.me.kills)
@@ -117,7 +138,7 @@ class GameTest {
     fun aShieldProtectsYourLine() {
         val (game, bot) = duelGame()
         bot.shield = 10f
-        aimAtLine(game, bot)
+        aimAt(game, game.me, bot, 1)
         run(game, 0.5f)
         assertTrue(bot.alive)
         assertTrue(game.events.any { it is GameEvent.Blocked })
@@ -126,8 +147,8 @@ class GameTest {
     @Test
     fun roundEndsWhenTimeRunsOut() {
         val game = Game(size = 60, botCount = 0, roundSeconds = 2f, seed = 3, countdownSeconds = 0f)
-        // Turn in place inside home so we never leave.
-        run(game, 5f) { game.steer(game.me.angle + 1f) }
+        // Circle inside home so we never leave.
+        run(game, 5f) { circleHome(game) }
         assertTrue(game.over)
         assertEquals(0f, game.timeLeft)
     }
@@ -140,7 +161,7 @@ class GameTest {
             var t = 0f
             var pickups = 0
             while (!game.over) {
-                game.steer(game.me.angle + 1f)
+                circleHome(game)
                 game.update(1f / 30)
                 pickups += game.events.count { it is GameEvent.PickedUp }
                 game.events.clear()
@@ -164,16 +185,8 @@ class GameTest {
         // You head out and draw a line; then the bot drives straight through it.
         me.shield = 0f
         drive(game, me.angle, 0.7f)
-        assertTrue("trail ${me.trail.size}", me.trail.size >= 2)
-        val i = me.trail[me.trail.size / 2]
-        val tx = i % game.size + 0.5f
-        val ty = i / game.size + 0.5f
-        bot.x = tx - sin(me.angle) * 1.6f
-        bot.y = ty + cos(me.angle) * 1.6f
-        bot.cellX = floor(bot.x).toInt()
-        bot.cellY = floor(bot.y).toInt()
-        bot.angle = atan2(ty - bot.y, tx - bot.x)
-        bot.targetAngle = bot.angle
+        assertTrue("trail ${me.trail.size}", me.trail.size >= 3)
+        aimAt(game, bot, me, me.trail.size / 2)
         game.steer(me.angle)
         var t = 0f
         while (me.alive && t < 1f) {
@@ -196,7 +209,7 @@ class GameTest {
             val game = Game(map, Characters.all[0], seed = map.index.toLong())
             assertEquals(map.size, game.size)
             assertEquals(map.bots + 1, game.players.size)
-            run(game, 48.1f) { game.steer(game.me.angle + 1f) }
+            run(game, 48.1f) { circleHome(game) }
             assertTrue("${map.name} should be over", game.over)
         }
     }
@@ -205,9 +218,51 @@ class GameTest {
     fun everyCharacterCanPlay() {
         for (c in Characters.all) {
             val game = Game(size = 80, botCount = 7, seed = c.id.toLong(), myCharacter = c, roundSeconds = 20f)
-            run(game, 30f) { game.steer(game.me.angle + 1f) }
+            run(game, 30f) { circleHome(game) }
             assertEquals(c, game.me.character)
             assertTrue(game.players.drop(1).none { it.character == c })
         }
+    }
+
+    @Test
+    fun bikesTurnOnlyAtRightAnglesAndNeverUTurn() {
+        val game = soloGame()
+        faceRight(game)
+        drive(game, 0f, 0.5f)
+        drive(game, PI.toFloat(), 0.5f) // straight back: ignored
+        assertEquals(0, game.me.dir)
+        drive(game, 0.3f, 0.5f) // a little off: snaps to right
+        assertEquals(0, game.me.dir)
+        drive(game, (PI / 2).toFloat(), 0.3f)
+        assertEquals(1, game.me.dir)
+        val me = game.me
+        assertEquals(me.x - floor(me.x), 0.5f, 0.01f) // still on the column's centre line
+    }
+
+    @Test
+    fun ridingAlongsideAnotherTrailGrinds() {
+        val (game, bot) = duelGame()
+        val me = game.me
+        val d = dirBetween(game, bot.trail[0], bot.trail[1])
+        val side = (d + 1) % 4
+        val i = bot.trail[0]
+        placeAt(game, me, (i % game.size + Game.DX[side]) + (i / game.size + Game.DY[side]) * game.size, d)
+        game.steer(me.angle)
+        var grinded = false
+        run(game, 0.3f) { grinded = grinded || me.grinding }
+        assertTrue("should grind next to the trail", grinded)
+        assertTrue(me.alive && bot.alive)
+    }
+
+    @Test
+    fun powerDropIsOfferedMidRoundOnce() {
+        val game = Game(size = 60, botCount = 0, roundSeconds = 45f, seed = 4, countdownSeconds = 0f, powerUpsEnabled = false)
+        assertFalse(game.powerDropOffered)
+        run(game, 19f) { circleHome(game) }
+        assertTrue(game.powerDropOffered)
+        game.powerDrop()
+        assertFalse(game.powerDropOffered)
+        assertTrue(game.me.shielded)
+        assertTrue(game.me.boost > 0f)
     }
 }

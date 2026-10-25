@@ -6,7 +6,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -37,11 +39,20 @@ fun DrawScope.drawCharacter(
     val color = colorOf(characterId)
     val r = radius
 
-    // Shadow, body and a chalky highlight.
-    drawCircle(Color.Black.copy(alpha = 0.22f), r * 1.02f, center + Offset(0f, r * 0.28f))
-    drawCircle(color.edge, r, center + Offset(0f, r * 0.1f))
-    drawCircle(color.fill, r * 0.94f, center)
-    drawCircle(Color.White.copy(alpha = 0.35f), r * 0.32f, center + Offset(-r * 0.38f, -r * 0.42f))
+    // A shaded ball: soft shadow, a darker underside, light from the top left and a shiny spot.
+    drawOval(Color.Black.copy(alpha = 0.25f), Offset(center.x - r * 0.9f, center.y + r * 0.55f), Size(r * 1.8f, r * 0.7f))
+    drawCircle(color.edge, r, center + Offset(0f, r * 0.12f))
+    drawCircle(
+        Brush.radialGradient(
+            listOf(lerp(color.fill, Color.White, 0.55f), color.fill, color.edge),
+            center = center + Offset(-r * 0.35f, -r * 0.45f),
+            radius = r * 1.7f,
+        ),
+        r * 0.96f,
+        center,
+    )
+    drawCircle(color.edge.copy(alpha = 0.6f), r * 0.96f, center, style = Stroke(r * 0.05f))
+    drawOval(Color.White.copy(alpha = 0.7f), Offset(center.x - r * 0.62f, center.y - r * 0.7f), Size(r * 0.42f, r * 0.26f))
 
     drawAccessory(characterId, center, r, color)
 
@@ -198,8 +209,9 @@ fun CharacterPortrait(characterId: Int, modifier: Modifier = Modifier, mood: Moo
 }
 
 /**
- * A rider on a glowing bike, seen from above. The bike turns with [angle];
- * the rider's face stays upright and looks the way they're heading.
+ * A rider on a glowing bike, seen from above and a little from the front, so
+ * the bike has a visible side and casts a shadow. The bike turns with [angle];
+ * the rider sits up on top, bobs with the ride and looks the way they're heading.
  */
 fun DrawScope.drawBike(
     characterId: Int,
@@ -212,31 +224,76 @@ fun DrawScope.drawBike(
     val color = colorOf(characterId)
     val len = size * 2.3f
     val wid = size * 0.75f
-    rotate(Math.toDegrees(angle.toDouble()).toFloat(), pivot = center) {
+    val depth = size * 0.4f
+    val deg = Math.toDegrees(angle.toDouble()).toFloat()
+    fun body(c: Offset) = Offset(c.x - len / 2, c.y - wid / 2)
+
+    // Soft ground shadow.
+    val shadowAt = center + Offset(size * 0.3f, depth * 1.8f)
+    rotate(deg, pivot = shadowAt) {
+        for (k in 0..2) {
+            val g = size * 0.16f * k
+            drawRoundRect(Color.Black.copy(alpha = 0.16f), body(shadowAt) - Offset(g, g), Size(len + 2 * g, wid + 2 * g), CornerRadius(wid / 2 + g))
+        }
+    }
+    // The bike's side, stacked downward so it reads as a solid block.
+    for (k in 4 downTo 1) {
+        val c = center + Offset(0f, depth * k / 4f)
+        rotate(deg, pivot = c) {
+            drawRoundRect(lerp(color.edge, Color.Black, 0.25f * k / 4f), body(c), Size(len, wid), CornerRadius(wid / 2))
+        }
+    }
+    rotate(deg, pivot = center) {
         // Headlight beam.
         val beam = Path().apply {
             moveTo(center.x + len * 0.45f, center.y - wid * 0.2f)
-            lineTo(center.x + len * 1.3f, center.y - wid * 0.9f)
-            lineTo(center.x + len * 1.3f, center.y + wid * 0.9f)
+            lineTo(center.x + len * 1.4f, center.y - wid * 1.0f)
+            lineTo(center.x + len * 1.4f, center.y + wid * 1.0f)
             lineTo(center.x + len * 0.45f, center.y + wid * 0.2f)
             close()
         }
-        drawPath(beam, color.fill.copy(alpha = 0.12f))
-        // Glow, body, and a bright outline.
-        val topLeft = Offset(center.x - len / 2, center.y - wid / 2)
-        drawRoundRect(color.fill.copy(alpha = 0.25f), topLeft - Offset(size * 0.25f, size * 0.25f), Size(len + size * 0.5f, wid + size * 0.5f), CornerRadius(wid))
-        drawRoundRect(Color(0xFF0A0D1F), topLeft, Size(len, wid), CornerRadius(wid / 2))
+        drawPath(beam, Brush.horizontalGradient(listOf(color.fill.copy(alpha = 0.3f), Color.Transparent), startX = center.x + len * 0.45f, endX = center.x + len * 1.4f))
+        // Glow, a dark glossy top, and a bright neon rim.
+        val topLeft = body(center)
+        drawRoundRect(color.fill.copy(alpha = 0.22f), topLeft - Offset(size * 0.3f, size * 0.3f), Size(len + size * 0.6f, wid + size * 0.6f), CornerRadius(wid))
+        drawRoundRect(
+            Brush.verticalGradient(listOf(Color(0xFF2A3160), Color(0xFF0A0D1F)), startY = topLeft.y, endY = topLeft.y + wid),
+            topLeft, Size(len, wid), CornerRadius(wid / 2),
+        )
         drawRoundRect(color.fill, topLeft, Size(len, wid), CornerRadius(wid / 2), style = Stroke(size * 0.14f))
-        // Wheels.
+        // A glowing stripe down the middle and spinning wheels.
+        drawLine(color.fill.copy(alpha = 0.8f), Offset(center.x - len * 0.3f, center.y), Offset(center.x + len * 0.3f, center.y), size * 0.08f, StrokeCap.Round)
         for (k in intArrayOf(-1, 1)) {
             val w = Offset(center.x + k * len * 0.36f, center.y)
             drawRoundRect(color.fill, w - Offset(size * 0.32f, wid * 0.42f), Size(size * 0.64f, wid * 0.84f), CornerRadius(size * 0.2f))
-            drawRoundRect(Color.White.copy(alpha = 0.8f), w - Offset(size * 0.16f, wid * 0.2f), Size(size * 0.32f, wid * 0.4f), CornerRadius(size * 0.1f))
+            val spin = (time * 14f) % 1f
+            drawLine(Color.White.copy(alpha = 0.85f), w + Offset((spin - 0.5f) * size * 0.5f, -wid * 0.3f), w + Offset((spin - 0.5f) * size * 0.5f, wid * 0.3f), size * 0.1f, StrokeCap.Round)
         }
-        // Headlight.
+        // Headlight and tail light.
+        drawCircle(Color.White.copy(alpha = 0.4f), size * 0.28f, Offset(center.x + len * 0.5f, center.y))
         drawCircle(Color.White, size * 0.13f, Offset(center.x + len * 0.5f, center.y))
+        drawCircle(Color(0xFFFF2B4A), size * 0.1f, Offset(center.x - len * 0.5f, center.y))
     }
-    drawCharacter(characterId, center, size * 0.62f, angle, mood, time)
+    // The rider sits up on the bike, bobbing a little with the ride.
+    val bob = sin(time * 9f + characterId) * size * 0.05f
+    drawCharacter(characterId, center - Offset(0f, size * 0.45f + bob), size * 0.62f, angle, mood, time)
+}
+
+/** A little gold crown, for whoever has the most land. */
+fun DrawScope.drawCrown(c: Offset, r: Float) {
+    val crown = Path().apply {
+        moveTo(c.x - r, c.y + r * 0.5f)
+        lineTo(c.x - r * 1.1f, c.y - r * 0.6f)
+        lineTo(c.x - r * 0.5f, c.y - r * 0.05f)
+        lineTo(c.x, c.y - r * 0.8f)
+        lineTo(c.x + r * 0.5f, c.y - r * 0.05f)
+        lineTo(c.x + r * 1.1f, c.y - r * 0.6f)
+        lineTo(c.x + r, c.y + r * 0.5f)
+        close()
+    }
+    drawPath(crown, Brush.verticalGradient(listOf(Color(0xFFFFF1A6), Gold, GoldEdge), startY = c.y - r * 0.8f, endY = c.y + r * 0.5f))
+    drawPath(crown, GoldEdge, style = Stroke(r * 0.12f))
+    drawCircle(Color(0xFFFF4F5E), r * 0.16f, Offset(c.x, c.y + r * 0.1f))
 }
 
 /** A rider on their bike, for menus. */

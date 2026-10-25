@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -99,6 +100,7 @@ fun ResultsScreen(
     canDouble: Boolean,
     newBest: Boolean,
     profile: Profile,
+    bonusCoins: Int,
     onDouble: () -> Unit,
     onPlayAgain: () -> Unit,
     onHome: () -> Unit,
@@ -145,12 +147,7 @@ fun ResultsScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
             ) {
-                BikePortrait(
-                    me.character.id,
-                    Modifier.size(180.dp, 130.dp),
-                    mood = if (won) Mood.HAPPY else if (reason != null) Mood.KNOCKED_OUT else Mood.SCARED,
-                    time = time,
-                )
+                Podium(game, time)
                 Text(title, fontSize = 34.sp, fontWeight = FontWeight.Black, color = if (won) NeonYellow else KoRed, textAlign = TextAlign.Center)
                 when {
                     won && !lastMap -> Text("Next up: Map ${mapIndex + 2}, ${Maps.byIndex(mapIndex + 1).name}", color = themeOf(mapIndex + 1).accent, fontWeight = FontWeight.Bold)
@@ -172,6 +169,9 @@ fun ResultsScreen(
                 Pill {
                     CoinIcon(Modifier.size(26.dp))
                     Text("  +$shownCoins coins", color = NeonYellow, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                }
+                if (bonusCoins > 0) {
+                    Text("+ $bonusCoins from the Bonus Rush", color = NeonYellow.copy(alpha = 0.85f), fontWeight = FontWeight.Bold)
                 }
                 if (canDouble && !doubled) {
                     Button(
@@ -227,3 +227,46 @@ private fun Stat(label: String, value: String) {
         }
     }
 }
+
+/** The top three riders on a stepped podium, the winner in the middle. */
+@Composable
+private fun Podium(game: Game, time: Float) {
+    val top = game.ranking().take(3)
+    val order = listOf(1, 0, 2).filter { it < top.size }
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
+        for (place in order) {
+            val p = top[place]
+            val color = colorOf(p.character.id)
+            val step = when (place) {
+                0 -> 70.dp
+                1 -> 48.dp
+                else -> 32.dp
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(p.name, color = if (p.isBot) Color.White else NeonYellow, fontWeight = FontWeight.Black, fontSize = 13.sp, maxLines = 1)
+                BikePortrait(
+                    p.character.id,
+                    Modifier.size(if (place == 0) 104.dp else 84.dp, if (place == 0) 84.dp else 68.dp),
+                    mood = when {
+                        !p.alive -> Mood.KNOCKED_OUT
+                        place == 0 -> Mood.HAPPY
+                        else -> Mood.NORMAL
+                    },
+                    time = time + place,
+                )
+                Box(
+                    Modifier
+                        .size(92.dp, step)
+                        .background(Brush.verticalGradient(listOf(color.fill, color.edge)), RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
+                    contentAlignment = Alignment.TopCenter,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${place + 1}", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+                        Text("%.1f%%".format(game.percent(p)), color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+

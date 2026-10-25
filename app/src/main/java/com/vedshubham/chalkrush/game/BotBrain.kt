@@ -2,10 +2,9 @@ package com.vedshubham.chalkrush.game
 
 import kotlin.math.PI
 import kotlin.math.atan2
-import kotlin.math.cos
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.hypot
-import kotlin.math.sin
 
 /**
  * Simple rules for a computer player: leave home, draw a box-shaped loop,
@@ -116,59 +115,59 @@ internal class BotBrain(private val boldness: Float) {
         return if (dist(me, near.x, near.y) < 8f) angleTo(me, near.x, near.y) else null
     }
 
-    /** The angle nearest to [desired] that doesn't run into my own line or the edge soon. */
+    /**
+     * The grid direction nearest to [desired] that doesn't run into my own line
+     * or the wall soon. Bikes can't U-turn, so straight back is never an option.
+     */
     private fun safest(game: Game, me: Player, desired: Float): Float {
-        var best = desired
-        var bestRoom = -1f
-        for (offset in OFFSETS) {
-            val a = desired + offset
-            val room = roomAhead(game, me, a)
-            if (room >= LOOKAHEAD) return a
+        val want = Game.dirOf(desired)
+        val back = (me.dir + 2) % 4
+        // Try the wanted way first, then the turns closest to it.
+        val order = intArrayOf(want, (want + 1) % 4, (want + 3) % 4, (want + 2) % 4)
+            .sortedBy { d -> if (d == want) 0f else angleGap(desired, d * Game.HALF_PI) + 1f }
+        var best = me.dir
+        var bestRoom = -1
+        for (d in order) {
+            if (d == back) continue
+            val room = roomAhead(game, me, d)
+            if (room >= LOOKAHEAD) return d * Game.HALF_PI
             if (room > bestRoom) {
                 bestRoom = room
-                best = a
+                best = d
             }
         }
-        return best
+        return best * Game.HALF_PI
     }
 
     /**
-     * Plays the next few cells forward, turning toward [target] as fast as a
-     * player can, and returns how far the bot gets before crossing its own line
-     * or reaching the edge ([LOOKAHEAD] if it doesn't). Crossing is allowed but
-     * makes messy loops, so bots avoid it. Getting home counts as safe.
+     * Counts open cells going straight in [d] from where the next turn happens,
+     * up to [LOOKAHEAD]. Reaching home counts as safe; my own line or the wall stops it.
      */
-    private fun roomAhead(game: Game, me: Player, target: Float): Float {
-        var x = me.x
-        var y = me.y
-        var angle = me.angle
-        var cx = me.cellX
-        var cy = me.cellY
-        val step = 0.35f
-        val maxTurn = game.turnRateOf(me) * step / game.speedOf(me)
-        var travelled = 0f
-        while (travelled < LOOKAHEAD) {
-            var diff = (target - angle) % Game.TWO_PI
-            if (diff > PI) diff -= Game.TWO_PI
-            if (diff < -PI) diff += Game.TWO_PI
-            angle += diff.coerceIn(-maxTurn, maxTurn)
-            x += cos(angle) * step
-            y += sin(angle) * step
-            travelled += step
-            val nx = floor(x).toInt()
-            val ny = floor(y).toInt()
-            if (nx == cx && ny == cy) continue
-            // Same side-cell rule as the game uses for diagonal moves.
-            if (nx != cx && ny != cy) {
-                val side = cellRisk(game, me, nx, cy)
-                if (side != 0) return if (side > 0) LOOKAHEAD else travelled
-            }
-            cx = nx
-            cy = ny
-            val risk = cellRisk(game, me, cx, cy)
-            if (risk != 0) return if (risk > 0) LOOKAHEAD else travelled
+    private fun roomAhead(game: Game, me: Player, d: Int): Int {
+        var x = me.cellX
+        var y = me.cellY
+        val along = (me.x - (x + 0.5f)) * Game.DX[me.dir] + (me.y - (y + 0.5f)) * Game.DY[me.dir]
+        if (along > 1e-4f) {
+            // Already past this cell's centre, so the turn happens one cell on.
+            x += Game.DX[me.dir]
+            y += Game.DY[me.dir]
+            if (cellRisk(game, me, x, y) < 0) return 0
+        }
+        for (k in 1..LOOKAHEAD) {
+            x += Game.DX[d]
+            y += Game.DY[d]
+            val risk = cellRisk(game, me, x, y)
+            if (risk > 0) return LOOKAHEAD
+            if (risk < 0) return k - 1
         }
         return LOOKAHEAD
+    }
+
+    private fun angleGap(a: Float, b: Float): Float {
+        var diff = (a - b) % Game.TWO_PI
+        if (diff > PI) diff -= Game.TWO_PI
+        if (diff < -PI) diff += Game.TWO_PI
+        return abs(diff)
     }
 
     /** 1 = home (safe), -1 = own line or off the board, 0 = open ground. */
@@ -185,7 +184,6 @@ internal class BotBrain(private val boldness: Float) {
     private fun angleTo(p: Player, x: Int, y: Int) = atan2(y + 0.5f - p.y, x + 0.5f - p.x)
 
     private companion object {
-        val OFFSETS = floatArrayOf(0f, 0.4f, -0.4f, 0.8f, -0.8f, 1.2f, -1.2f, 1.6f, -1.6f, 2.2f, -2.2f, 3.14f)
-        const val LOOKAHEAD = 5f
+        const val LOOKAHEAD = 5
     }
 }
