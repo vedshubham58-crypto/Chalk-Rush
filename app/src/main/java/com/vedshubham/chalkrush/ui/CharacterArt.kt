@@ -3,12 +3,15 @@ package com.vedshubham.chalkrush.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -191,5 +194,56 @@ fun CharacterPortrait(characterId: Int, modifier: Modifier = Modifier, mood: Moo
     Canvas(modifier) {
         val r = size.minDimension * 0.32f
         drawCharacter(characterId, Offset(size.width / 2, size.height * 0.56f), r, (Math.PI / 2).toFloat(), mood, time)
+    }
+}
+
+/**
+ * A rider on a glowing bike, seen from above. The bike turns with [angle];
+ * the rider's face stays upright and looks the way they're heading.
+ */
+fun DrawScope.drawBike(
+    characterId: Int,
+    center: Offset,
+    size: Float,
+    angle: Float,
+    mood: Mood,
+    time: Float,
+) {
+    val color = colorOf(characterId)
+    val len = size * 2.3f
+    val wid = size * 0.75f
+    rotate(Math.toDegrees(angle.toDouble()).toFloat(), pivot = center) {
+        // Headlight beam.
+        val beam = Path().apply {
+            moveTo(center.x + len * 0.45f, center.y - wid * 0.2f)
+            lineTo(center.x + len * 1.3f, center.y - wid * 0.9f)
+            lineTo(center.x + len * 1.3f, center.y + wid * 0.9f)
+            lineTo(center.x + len * 0.45f, center.y + wid * 0.2f)
+            close()
+        }
+        drawPath(beam, color.fill.copy(alpha = 0.12f))
+        // Glow, body, and a bright outline.
+        val topLeft = Offset(center.x - len / 2, center.y - wid / 2)
+        drawRoundRect(color.fill.copy(alpha = 0.25f), topLeft - Offset(size * 0.25f, size * 0.25f), Size(len + size * 0.5f, wid + size * 0.5f), CornerRadius(wid))
+        drawRoundRect(Color(0xFF0A0D1F), topLeft, Size(len, wid), CornerRadius(wid / 2))
+        drawRoundRect(color.fill, topLeft, Size(len, wid), CornerRadius(wid / 2), style = Stroke(size * 0.14f))
+        // Wheels.
+        for (k in intArrayOf(-1, 1)) {
+            val w = Offset(center.x + k * len * 0.36f, center.y)
+            drawRoundRect(color.fill, w - Offset(size * 0.32f, wid * 0.42f), Size(size * 0.64f, wid * 0.84f), CornerRadius(size * 0.2f))
+            drawRoundRect(Color.White.copy(alpha = 0.8f), w - Offset(size * 0.16f, wid * 0.2f), Size(size * 0.32f, wid * 0.4f), CornerRadius(size * 0.1f))
+        }
+        // Headlight.
+        drawCircle(Color.White, size * 0.13f, Offset(center.x + len * 0.5f, center.y))
+    }
+    drawCharacter(characterId, center, size * 0.62f, angle, mood, time)
+}
+
+/** A rider on their bike, for menus. */
+@Composable
+fun BikePortrait(characterId: Int, modifier: Modifier = Modifier, mood: Mood = Mood.HAPPY, time: Float = 0f) {
+    Canvas(modifier) {
+        val s = size.minDimension * 0.2f
+        drawBike(characterId, Offset(size.width / 2, size.height * 0.55f), s, -0.35f + kotlin.math.sin(time * 1.5f) * 0.08f, mood, time)
     }
 }

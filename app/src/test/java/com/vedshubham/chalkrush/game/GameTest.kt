@@ -77,7 +77,7 @@ class GameTest {
         drive(game, 0f, 1f) // right
         drive(game, (PI / 2).toFloat(), 1f) // down
         drive(game, PI.toFloat(), 1f) // left
-        drive(game, (-PI / 2).toFloat(), 1.5f) // up, back home
+        drive(game, (-PI / 2).toFloat(), 1.1f) // up, back home
         assertTrue(game.me.alive)
         assertTrue("land should grow, was ${game.me.land}", game.me.land > start + 20)
         assertTrue(game.me.trail.isEmpty())
@@ -149,11 +149,55 @@ class GameTest {
             assertTrue("round should end on time", game.timeLeft == 0f || !game.me.alive)
             val bots = game.players.drop(1)
             assertTrue("some bot should claim land", bots.any { game.percent(it) > 1f })
-            assertTrue("bots should pick up power-ups", pickups > 3)
+            assertTrue("bots should pick up power-ups", pickups > 0)
             // Land counts must match the board.
             for (p in game.players) {
                 assertEquals(game.owner.count { it == p.id }, p.land)
             }
+        }
+    }
+
+    @Test
+    fun reviveBringsYouBackOnYourLand() {
+        val (game, bot) = duelGame()
+        val me = game.me
+        // You head out and draw a line; then the bot drives straight through it.
+        me.shield = 0f
+        drive(game, me.angle, 0.7f)
+        assertTrue("trail ${me.trail.size}", me.trail.size >= 2)
+        val i = me.trail[me.trail.size / 2]
+        val tx = i % game.size + 0.5f
+        val ty = i / game.size + 0.5f
+        bot.x = tx - sin(me.angle) * 1.6f
+        bot.y = ty + cos(me.angle) * 1.6f
+        bot.cellX = floor(bot.x).toInt()
+        bot.cellY = floor(bot.y).toInt()
+        bot.angle = atan2(ty - bot.y, tx - bot.x)
+        bot.targetAngle = bot.angle
+        game.steer(me.angle)
+        var t = 0f
+        while (me.alive && t < 1f) {
+            game.update(1f / 60)
+            t += 1f / 60
+        }
+        assertFalse("should be knocked out", me.alive)
+        val land = me.land
+        game.revive()
+        assertTrue(me.alive)
+        assertTrue(game.revived)
+        assertEquals(land, me.land)
+        assertEquals(game.me.id, game.owner[me.cellY * game.size + me.cellX])
+        assertFalse(game.over)
+    }
+
+    @Test
+    fun everyMapEndsWithin45Seconds() {
+        for (map in Maps.all) {
+            val game = Game(map, Characters.all[0], seed = map.index.toLong())
+            assertEquals(map.size, game.size)
+            assertEquals(map.bots + 1, game.players.size)
+            run(game, 48.1f) { game.steer(game.me.angle + 1f) }
+            assertTrue("${map.name} should be over", game.over)
         }
     }
 

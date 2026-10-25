@@ -28,7 +28,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -123,7 +125,8 @@ private class Effects {
 }
 
 @Composable
-fun GameScreen(game: Game, onRoundOver: () -> Unit) {
+fun GameScreen(game: Game, mapIndex: Int, onRoundOver: () -> Unit) {
+    val theme = themeOf(mapIndex)
     var frame by remember { mutableIntStateOf(0) }
     val fx = remember(game) { Effects() }
     val view = LocalView.current
@@ -180,7 +183,7 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
                     val label = when (e.type) {
                         PowerType.SPEED -> "Speed!"
                         PowerType.SHIELD -> "Shield!"
-                        PowerType.SPLASH -> "Splash!"
+                        PowerType.SPLASH -> "Energy burst!"
                     }
                     fx.popups.add(Popup(label, e.x, e.y - 1f, color))
                     Sfx.play(Sound.POWER_UP)
@@ -243,10 +246,7 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
         }
     }
 
-    val specks = remember(game) {
-        val r = Random(7)
-        List(game.size * game.size / 12) { Offset(r.nextFloat() * game.size, r.nextFloat() * game.size) }
-    }
+    val miniMap = remember(game) { MiniMap(game, theme) }
     val textMeasurer = rememberTextMeasurer()
     val names = remember(game) {
         val style = TextStyle(
@@ -298,7 +298,8 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
             val ox = size.width / 2 - fx.camX * cell + (fx.rng.nextFloat() - 0.5f) * shake
             val oy = size.height / 2 - fx.camY * cell + (fx.rng.nextFloat() - 0.5f) * shake
 
-            drawBoard(game, cell, ox, oy, specks)
+            drawBoard(game, cell, ox, oy, theme, fx.clock)
+            drawTrails(game, cell, ox, oy)
             drawPowerUps(game, cell, ox, oy, fx.clock)
 
             for (p in fx.particles) {
@@ -312,23 +313,22 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
                 if (center.x < -cell * 4 || center.x > size.width + cell * 4 ||
                     center.y < -cell * 4 || center.y > size.height + cell * 4
                 ) continue
-                val bob = sin(fx.clock * 10f + p.id) * cell * 0.05f
-                val c = center + Offset(0f, bob)
+                val c = center
                 val radius = cell * 0.8f
                 if (p.boost > 0f) {
                     for (k in 1..3) {
-                        val back = c - Offset(cos(p.angle), sin(p.angle)) * (cell * 0.6f * k)
-                        drawCircle(SpeedColor.copy(alpha = 0.35f / k), radius * (1f - k * 0.15f), back)
+                        val back = c - Offset(cos(p.angle), sin(p.angle)) * (cell * 0.7f * k)
+                        drawCircle(SpeedColor.copy(alpha = 0.3f / k), radius * (1f - k * 0.15f), back)
                     }
                 }
-                drawCharacter(p.character.id, c, radius, p.angle, moodOf(game, p, fx), fx.clock)
+                drawBike(p.character.id, c, radius, p.angle, moodOf(game, p, fx), fx.clock)
                 if (p.shielded) {
                     val pulse = 0.5f + 0.3f * sin(fx.clock * 8f)
-                    drawCircle(ShieldColor.copy(alpha = 0.18f), radius * 1.45f, c)
-                    drawCircle(ShieldColor.copy(alpha = pulse), radius * 1.45f, c, style = Stroke(cell * 0.12f))
+                    drawCircle(ShieldColor.copy(alpha = 0.15f), radius * 1.9f, c)
+                    drawCircle(ShieldColor.copy(alpha = pulse), radius * 1.9f, c, style = Stroke(cell * 0.12f))
                 }
                 val label = names[p.id]
-                drawText(label, topLeft = Offset(c.x - label.size.width / 2f, c.y - radius * 1.6f - label.size.height))
+                drawText(label, topLeft = Offset(c.x - label.size.width / 2f, c.y - radius * 2f - label.size.height))
             }
 
             for (pop in fx.popups) {
@@ -339,7 +339,7 @@ fun GameScreen(game: Game, onRoundOver: () -> Unit) {
                 drawText(layout, topLeft = Offset(x, y))
             }
         }
-        Hud(game, fx, tick = frame)
+        Hud(game, fx, tick = frame, miniMap = miniMap, mapIndex = mapIndex)
     }
 }
 
@@ -387,78 +387,103 @@ private fun DrawScope.drawPowerUps(game: Game, cell: Float, ox: Float, oy: Float
     }
 }
 
-private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, specks: List<Offset>) {
+private fun DrawScope.drawBoard(game: Game, cell: Float, ox: Float, oy: Float, theme: MapTheme, clock: Float) {
     val n = game.size
-    drawRect(Concrete, topLeft = Offset(ox, oy), size = Size(n * cell, n * cell))
-    for (s in specks) {
-        val p = Offset(ox + s.x * cell, oy + s.y * cell)
-        if (p.x in -4f..size.width + 4f && p.y in -4f..size.height + 4f) {
-            drawCircle(ConcreteSpeck, radius = cell * 0.08f, center = p)
-        }
-    }
-    for (k in 0..n step 10) {
-        drawLine(ConcreteJoint, Offset(ox + k * cell, oy), Offset(ox + k * cell, oy + n * cell), strokeWidth = cell * 0.12f)
-        drawLine(ConcreteJoint, Offset(ox, oy + k * cell), Offset(ox + n * cell, oy + k * cell), strokeWidth = cell * 0.12f)
-    }
-    // A painted kerb around the edge, so it's clear you bounce off it.
-    drawRect(Color(0xFFFFE066), topLeft = Offset(ox - cell * 0.4f, oy - cell * 0.4f), size = Size((n + 0.8f) * cell, (n + 0.8f) * cell), style = Stroke(cell * 0.4f))
+    drawRect(theme.night, topLeft = Offset(ox, oy), size = Size(n * cell, n * cell))
 
     val x0 = floor(-ox / cell).toInt().coerceAtLeast(0)
     val x1 = ceil((size.width - ox) / cell).toInt().coerceAtMost(n - 1)
     val y0 = floor(-oy / cell).toInt().coerceAtLeast(0)
     val y1 = ceil((size.height - oy) / cell).toInt().coerceAtMost(n - 1)
+
+    // The grid: thin lines every 4 cells, brighter ones every 16.
+    for (k in (x0 / 4) * 4..x1 + 1 step 4) {
+        val bright = k % 16 == 0
+        drawLine(if (bright) theme.grid.copy(alpha = 1f) else theme.grid.copy(alpha = 0.55f), Offset(ox + k * cell, oy + y0 * cell), Offset(ox + k * cell, oy + (y1 + 1) * cell), strokeWidth = if (bright) cell * 0.1f else cell * 0.05f)
+    }
+    for (k in (y0 / 4) * 4..y1 + 1 step 4) {
+        val bright = k % 16 == 0
+        drawLine(if (bright) theme.grid.copy(alpha = 1f) else theme.grid.copy(alpha = 0.55f), Offset(ox + x0 * cell, oy + k * cell), Offset(ox + (x1 + 1) * cell, oy + k * cell), strokeWidth = if (bright) cell * 0.1f else cell * 0.05f)
+    }
+    // A glowing wall around the arena, so it's clear you bounce off it.
+    val pulse = 0.6f + 0.25f * sin(clock * 3f)
+    drawRect(theme.accent.copy(alpha = 0.25f), topLeft = Offset(ox - cell * 0.6f, oy - cell * 0.6f), size = Size((n + 1.2f) * cell, (n + 1.2f) * cell), style = Stroke(cell * 1.0f))
+    drawRect(theme.accent.copy(alpha = pulse), topLeft = Offset(ox - cell * 0.3f, oy - cell * 0.3f), size = Size((n + 0.6f) * cell, (n + 0.6f) * cell), style = Stroke(cell * 0.25f))
     if (x0 > x1 || y0 > y1) return
 
-    // Land: a darker edge underneath, then the chalk fill on top, drawn in row runs.
-    for (pass in 0..1) {
-        for (y in y0..y1) {
-            var x = x0
-            while (x <= x1) {
-                val o = game.owner[y * n + x]
-                if (o == NONE) {
-                    x++
-                    continue
-                }
-                var end = x
-                while (end + 1 <= x1 && game.owner[y * n + end + 1] == o) end++
-                val color = colorOf(game.players[o].character.id)
-                val top = oy + y * cell + if (pass == 0) cell * 0.25f else 0f
-                drawRect(
-                    if (pass == 0) color.edge else color.fill,
-                    topLeft = Offset(ox + x * cell, top),
-                    size = Size((end - x + 1) * cell + 0.5f, cell + 0.5f),
-                )
-                x = end + 1
+    // Land: a see-through neon fill, drawn in row runs.
+    for (y in y0..y1) {
+        var x = x0
+        while (x <= x1) {
+            val o = game.owner[y * n + x]
+            if (o == NONE) {
+                x++
+                continue
             }
+            var end = x
+            while (end + 1 <= x1 && game.owner[y * n + end + 1] == o) end++
+            drawRect(
+                colorOf(game.players[o].character.id).fill.copy(alpha = 0.32f),
+                topLeft = Offset(ox + x * cell, oy + y * cell),
+                size = Size((end - x + 1) * cell + 0.5f, cell + 0.5f),
+            )
+            x = end + 1
         }
     }
+    // Bright glowing borders where one player's land ends.
+    for (pass in 0..1) {
+        val width = if (pass == 0) cell * 0.45f else cell * 0.14f
+        for (y in y0..y1) for (x in x0..x1) {
+            val o = game.owner[y * n + x]
+            if (o == NONE) continue
+            val color = colorOf(game.players[o].character.id).fill.copy(alpha = if (pass == 0) 0.3f else 1f)
+            val left = ox + x * cell
+            val top = oy + y * cell
+            if (x == 0 || game.owner[y * n + x - 1] != o) drawLine(color, Offset(left, top), Offset(left, top + cell), width)
+            if (x == n - 1 || game.owner[y * n + x + 1] != o) drawLine(color, Offset(left + cell, top), Offset(left + cell, top + cell), width)
+            if (y == 0 || game.owner[(y - 1) * n + x] != o) drawLine(color, Offset(left, top), Offset(left + cell, top), width)
+            if (y == n - 1 || game.owner[(y + 1) * n + x] != o) drawLine(color, Offset(left, top + cell), Offset(left + cell, top + cell), width)
+        }
+    }
+}
 
-    // Chalk lines still being drawn: round chalk dabs.
-    for (y in y0..y1) for (x in x0..x1) {
-        val t = game.trailOwner[y * n + x]
-        if (t == NONE) continue
-        val color = colorOf(game.players[t].character.id)
-        val c = Offset(ox + (x + 0.5f) * cell, oy + (y + 0.5f) * cell)
-        drawCircle(color.edge.copy(alpha = 0.6f), cell * 0.5f, c + Offset(0f, cell * 0.1f))
-        drawCircle(color.fill, cell * 0.45f, c)
+/** Light trails: a wide glow with a bright core, from home to the bike. */
+private fun DrawScope.drawTrails(game: Game, cell: Float, ox: Float, oy: Float) {
+    val n = game.size
+    for (p in game.players) {
+        if (!p.alive || p.trail.isEmpty()) continue
+        val path = Path()
+        p.trail.forEachIndexed { k, i ->
+            val x = ox + (i % n + 0.5f) * cell
+            val y = oy + (i / n + 0.5f) * cell
+            if (k == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.lineTo(ox + p.x * cell, oy + p.y * cell)
+        val color = colorOf(p.character.id).fill
+        drawPath(path, color.copy(alpha = 0.25f), style = Stroke(cell * 0.9f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, color, style = Stroke(cell * 0.35f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawPath(path, Color.White.copy(alpha = 0.8f), style = Stroke(cell * 0.1f, cap = StrokeCap.Round, join = StrokeJoin.Round))
     }
 }
 
 @Composable
-private fun Hud(game: Game, fx: Effects, tick: Int) {
+private fun Hud(game: Game, fx: Effects, tick: Int, miniMap: MiniMap, mapIndex: Int) {
     tick // refresh every frame
     val pill = Modifier
         .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
         .padding(horizontal = 10.dp, vertical = 6.dp)
     Box(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
         val left = ceil(game.timeLeft).toInt()
-        Text(
-            "%d:%02d".format(left / 60, left % 60),
-            color = if (left <= 10) Color(0xFFFF6B6B) else Color.White,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = pill.align(Alignment.TopStart),
-        )
+        Column(pill.align(Alignment.TopStart)) {
+            Text(
+                "0:%02d".format(left.coerceAtMost(59)),
+                color = if (left <= 10) Color(0xFFFF6B6B) else Color.White,
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text("Map ${mapIndex + 1}", color = themeOf(mapIndex).accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Win: most land\nor %.0f%%".format(game.winPercent), color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+        }
 
         Column(pill.align(Alignment.TopEnd).width(160.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             val ranking = game.ranking()
@@ -521,16 +546,27 @@ private fun Hud(game: Game, fx: Effects, tick: Int) {
 
         if (game.countdown > 0f) {
             Text(
-                "Swipe to steer.\nLeave your land, draw a loop, and come back to claim it.\nTouch other lines to knock players out!",
+                "Swipe to steer your bike.\nLeave your zone and loop back to claim land.\nHit other trails to knock riders out!",
                 color = Color.White,
                 fontSize = 15.sp,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 64.dp).then(pill),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 120.dp).then(pill),
             )
         }
 
+        Canvas(
+            Modifier
+                .align(Alignment.BottomStart)
+                .size(104.dp)
+                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .padding(4.dp),
+        ) {
+            if (tick % 8 == 0) miniMap.refresh()
+            drawMiniMap(game, miniMap)
+        }
+
         Row(
-            Modifier.align(Alignment.BottomCenter).then(pill),
+            Modifier.align(Alignment.BottomEnd).then(pill),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
