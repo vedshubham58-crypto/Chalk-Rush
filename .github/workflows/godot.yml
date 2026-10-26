@@ -90,8 +90,14 @@ jobs:
           GODOT_ANDROID_KEYSTORE_RELEASE_USER: androiddebugkey
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
-          mkdir -p godot/build
-          godot --headless --path godot --install-android-build-template --export-release "Android" build/neon-rush.apk
+          # Install Godot's Android build template by hand, so we can tweak it first:
+          # compressing the engine library roughly halves the download.
+          mkdir -p godot/android/build godot/build
+          unzip -oq ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/android_source.zip -d godot/android/build
+          echo -n "${GODOT_VERSION}.stable" > godot/android/.build_version
+          touch godot/android/.gdignore
+          printf '\nandroid {\n    packagingOptions {\n        jniLibs {\n            useLegacyPackaging true\n        }\n    }\n}\n' >> godot/android/build/build.gradle
+          godot --headless --path godot --export-release "Android" build/neon-rush.apk
           ls -la godot/build
 
       - name: Check the ads plugin is inside the APK
@@ -102,6 +108,9 @@ jobs:
           grep -q "com.google.android.gms.ads.APPLICATION_ID" manifest.txt
           unzip -p godot/build/neon-rush.apk 'classes*.dex' | grep -aq "com/vedshubham/neonads/NeonAds"
           echo "AdMob plugin found in the APK"
+          ls -la godot/build/neon-rush.apk
+          # Compressed native libraries only install if the app may extract them.
+          if unzip -v godot/build/neon-rush.apk "lib/*" | grep -q Defl; then grep -A1 -i extractNativeLibs manifest.txt | grep -q "0xffffffff"; fi
 
       - uses: actions/upload-artifact@v4
         with:
