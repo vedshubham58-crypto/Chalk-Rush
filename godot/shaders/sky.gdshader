@@ -1,38 +1,58 @@
-// A synthwave sky: deep blue overhead fading to hot pink at the horizon, a big
-// striped sun to the north and a scatter of stars.
+// A bright hyperspeed sky: clear blue overhead, warm haze at the horizon, and a
+// blazing light gate that always sits dead ahead of the camera, throwing beams
+// of light outward that rush past as you ride.
 shader_type sky;
 
-uniform vec3 top_color : source_color = vec3(0.04, 0.02, 0.16);
-uniform vec3 mid_color : source_color = vec3(0.28, 0.06, 0.42);
-uniform vec3 horizon_color : source_color = vec3(1.0, 0.32, 0.55);
-uniform vec3 sun_top : source_color = vec3(1.0, 0.85, 0.3);
-uniform vec3 sun_bottom : source_color = vec3(1.0, 0.2, 0.55);
-uniform vec3 sun_dir = vec3(0.0, 0.12, -1.0);
+uniform vec3 top_color : source_color = vec3(0.03, 0.15, 0.65);
+uniform vec3 mid_color : source_color = vec3(0.2, 0.45, 1.0);
+uniform vec3 horizon_color : source_color = vec3(1.0, 0.6, 0.45);
+uniform vec3 core_color : source_color = vec3(1.0, 0.86, 0.6);
+uniform vec3 halo_color : source_color = vec3(1.0, 0.45, 0.25);
+uniform vec3 beam_color : source_color = vec3(0.55, 0.8, 1.0);
+uniform vec3 ring_color : source_color = vec3(1.0, 0.4, 0.9);
+/// Where the camera looks, flat on the ground. The gate sits that way.
+uniform vec3 ahead = vec3(0.0, 0.0, -1.0);
+/// 0 = cruising, 1 = boosting: beams rush faster and burn brighter.
+uniform float speed = 0.0;
 
-float hash(vec2 p) {
-	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+float hash(float p) {
+	return fract(sin(p * 127.1) * 43758.5453);
 }
 
 void sky() {
 	vec3 d = EYEDIR;
 	float y = d.y;
-	vec3 col = mix(mid_color, top_color, smoothstep(0.05, 0.6, y));
-	col = mix(horizon_color, col, smoothstep(-0.02, 0.18, y));
+	vec3 col = mix(mid_color, top_color, smoothstep(0.1, 0.7, y));
+	col = mix(horizon_color, col, smoothstep(0.0, 0.3, y));
 	if (y < 0.0) {
-		col = mix(horizon_color * 0.6, vec3(0.05, 0.02, 0.12), smoothstep(0.0, -0.3, y));
+		col = mix(horizon_color * 0.8, vec3(0.06, 0.12, 0.35), smoothstep(0.0, -0.25, y));
 	}
-	// Stars.
-	vec2 g = floor(vec2(atan(d.x, d.z) * 180.0, y * 200.0));
-	float s = step(0.996, hash(g)) * smoothstep(0.1, 0.5, y);
-	col += vec3(s) * (0.6 + 0.4 * sin(TIME * 2.0 + hash(g) * 30.0));
-	// The sun, with stripes cut out of its lower half.
-	vec3 sd = normalize(sun_dir);
-	float r = acos(clamp(dot(d, sd), -1.0, 1.0));
-	float disk = 1.0 - smoothstep(0.26, 0.27, r);
-	float rel = (d.y - sd.y) / 0.27;
-	float stripes = rel < 0.1 ? step(0.35 + rel * 1.5, fract(rel * 9.0)) : 1.0;
-	vec3 sun = mix(sun_bottom, sun_top, clamp(rel * 0.5 + 0.5, 0.0, 1.0));
-	col = mix(col, sun * 2.2, disk * stripes * step(-0.01, y));
-	col += sun_bottom * 0.35 * exp(-r * 4.0) * step(-0.05, y);
+
+	// The gate's frame: forward, right and up, centred just above the horizon.
+	vec3 f = normalize(vec3(ahead.x, 0.0, ahead.z));
+	vec3 core = normalize(f + vec3(0.0, 0.16, 0.0));
+	vec3 r = normalize(cross(core, vec3(0.0, 1.0, 0.0)));
+	vec3 u = cross(r, core);
+	float facing = dot(d, core);
+	float ang = acos(clamp(facing, -1.0, 1.0));
+	float theta = atan(dot(d, u), dot(d, r));
+	float t = TIME * (1.0 + speed * 1.5);
+
+	// Beams fanning out from the gate, each broken into dashes that fly outward.
+	float spokes = 18.0;
+	float sector = floor((theta / 6.2831 + 0.5) * spokes);
+	float within = fract((theta / 6.2831 + 0.5) * spokes);
+	float width = 0.18 + 0.12 * hash(sector);
+	float beam = smoothstep(width, 0.0, abs(within - 0.5));
+	float dash = smoothstep(0.35, 0.6, fract(ang * 9.0 - t * (1.2 + hash(sector + 3.0)) + hash(sector) * 5.0));
+	float reach = smoothstep(0.12, 0.3, ang) * (1.0 - smoothstep(0.9, 1.6, ang));
+	float ground = smoothstep(-0.02, 0.04, y);
+	col += beam_color * beam * (0.2 + 0.8 * dash) * reach * (0.8 + speed * 0.6) * ground;
+
+	// The ring of the gate, and the blinding light inside it.
+	float ring = exp(-pow((ang - 0.2) * 40.0, 2.0));
+	col += ring_color * ring * 1.6 * ground;
+	col = mix(col, core_color * 2.0, smoothstep(0.15, 0.06, ang));
+	col += halo_color * exp(-ang * 4.0) * 0.7;
 	COLOR = col;
 }

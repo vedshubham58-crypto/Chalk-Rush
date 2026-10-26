@@ -3,6 +3,7 @@ extends Node
 
 const PATH := "user://save.cfg"
 const XP_PER_LEVEL := 120
+const KEYS := ["coins", "selected", "unlocked", "level", "best_level", "conquered", "nickname", "xp", "wins", "rounds", "kills", "best_streak", "sound", "seen_story"]
 
 var coins := 0
 var selected := 0
@@ -18,19 +19,21 @@ var rounds := 0
 var kills := 0
 var best_streak := 0
 var sound := true
+## Whether the story intro has been shown once.
+var seen_story := false
 
 
 func _ready() -> void:
 	var f := ConfigFile.new()
 	if f.load(PATH) != OK:
 		return
-	for k in ["coins", "selected", "unlocked", "level", "best_level", "conquered", "nickname", "xp", "wins", "rounds", "kills", "best_streak", "sound"]:
+	for k in KEYS:
 		set(k, f.get_value("p", k, get(k)))
 
 
 func save() -> void:
 	var f := ConfigFile.new()
-	for k in ["coins", "selected", "unlocked", "level", "best_level", "conquered", "nickname", "xp", "wins", "rounds", "kills", "best_streak", "sound"]:
+	for k in KEYS:
 		f.set_value("p", k, get(k))
 	f.save(PATH)
 
