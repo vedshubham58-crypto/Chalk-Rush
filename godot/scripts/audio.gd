@@ -58,3 +58,8 @@ func play(name: String, volume_db := 0.0, pitch := 1.0) -> void:
 			p.pitch_scale = pitch
 			p.play()
 			return
+
+
+## Silences the game while a full-screen ad plays.
+func duck(on: bool) -> void:
+	AudioServer.set_bus_mute(0, on)

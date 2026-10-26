@@ -67,3 +67,27 @@ static func arena(code: String) -> Dictionary:
 		a["mask"] = mask
 		a["size"] = size
 	return a
+
+
+## Player-style names for the other riders, different every round.
+const NAME_PARTS := ["Neo", "Kai", "Ravi", "Zara", "Aarav", "Luna", "Vex", "Ishaan", "Mira", "Jax", "Ananya", "Rex",
+	"Kabir", "Nova", "Arjun", "Sky", "Diya", "Blaze", "Rohan", "Yuki", "Leo", "Priya", "Axel", "Sana", "Omar",
+	"Mateo", "Lena", "Ivy", "Dev", "Tara", "Finn", "Riya", "Zed", "Ayaan", "Kenji", "Maya", "Nico", "Isha", "Ryu", "Aditi"]
+const NAME_TAGS := ["Pro", "X", "GG", "Rider", "King", "Queen", "07", "99", "Bolt", "Boss", "YT", "Ninja", "Zoom", "Op"]
+
+
+static func random_names(count: int, rng: RandomNumberGenerator) -> Array[String]:
+	var out: Array[String] = []
+	while out.size() < count:
+		var base: String = NAME_PARTS[rng.randi() % NAME_PARTS.size()]
+		var n: String
+		match rng.randi() % 6:
+			0: n = base
+			1: n = base + str(rng.randi_range(1, 999))
+			2: n = base + "_" + NAME_TAGS[rng.randi() % NAME_TAGS.size()]
+			3: n = base.to_lower() + str(rng.randi_range(10, 99))
+			4: n = "x" + base + "x"
+			_: n = NAME_TAGS[rng.randi() % NAME_TAGS.size()] + base
+		if not (n in out):
+			out.append(n)
+	return out
