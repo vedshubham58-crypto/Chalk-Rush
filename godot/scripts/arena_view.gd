@@ -1,7 +1,7 @@
 class_name ArenaView
 extends Node3D
 ## Draws a NeonGame in 3D, seen from a chase camera behind your bike.
-## The country is one smooth glowing floor (claimed land rises in its owner's
+## The land is one smooth glowing floor (claimed land rises in its owner's
 ## colour), set in a neon city under a synthwave sky. Light walls trail every
 ## bike. One cell is one unit; game y runs along world +Z.
 
@@ -182,7 +182,7 @@ func _build_floor() -> void:
 	mi.extra_cull_margin = 2.0
 	add_child(mi)
 
-	# The country stands on a block, so its edge reads as a cliff over the city.
+	# The land stands on a block, so its edge reads as a cliff over the city.
 	var under := MeshInstance3D.new()
 	var slab := PlaneMesh.new()
 	slab.size = Vector2(s * 6, s * 6)
@@ -199,7 +199,7 @@ func _build_floor() -> void:
 	_build_cliffs()
 
 
-## Glowing rails and a dark wall all round the country's outline.
+## Glowing rails and a dark wall all round the land's outline.
 func _build_cliffs() -> void:
 	var rails: Array[Transform3D] = []
 	var walls: Array[Transform3D] = []
@@ -243,7 +243,7 @@ func _multi(mesh: Mesh, xf: Array[Transform3D], mat: Material, colors: Array[Col
 	return mm
 
 
-## A ring of neon tower blocks round the country, so you ride through a city at night.
+## A ring of neon tower blocks round the land, so you ride through a city at night.
 func _build_city() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = game.size * 31 + 7

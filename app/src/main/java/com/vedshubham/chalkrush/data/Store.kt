@@ -59,7 +59,7 @@ data class Profile(
     val emblem: Int,
     val xp: Int,
     val kills: Int,
-    /** Maps (countries) you've won at least once. */
+    /** Maps (lands) you've won at least once. */
     val conquered: Set<Int>,
     /** Bike upgrade levels, 0..[MAX_UPGRADE]. */
     val engine: Int,

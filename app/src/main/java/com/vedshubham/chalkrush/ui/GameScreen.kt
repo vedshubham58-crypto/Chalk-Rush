@@ -395,7 +395,7 @@ fun GameScreen(
             val shake = fx.shake * fx.shake * cellPx * 0.6f
             cam.frame(size.width, size.height, fx.camX, fx.camY, cellPx, (fx.rng.nextFloat() - 0.5f) * shake, (fx.rng.nextFloat() - 0.5f) * shake)
 
-            // Far-off glow behind the country, like a city skyline in the dark.
+            // Far-off glow behind the land, like a city skyline in the dark.
             drawRect(Brush.verticalGradient(listOf(lerp(OffBoard, theme.accent, 0.18f), OffBoard), endY = size.height * 0.45f))
 
             val leader = game.ranking().first().takeIf { it.land > 0 }

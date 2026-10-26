@@ -92,7 +92,7 @@ private fun DrawScope.quad(a: Offset, b: Offset, c: Offset, d: Offset, color: Co
 
 /**
  * Draws the arena in 3D, far rows first so nearer things cover them: the
- * country floating in the dark with glowing cliffs, raised land, and standing
+ * land floating in the dark with glowing cliffs, raised land, and standing
  * light walls for trails. [onRow] draws whatever stands in that row (bikes,
  * power-ups) at the right moment.
  */
@@ -142,7 +142,7 @@ private fun DrawScope.drawRow(
     val y0f = y.toFloat()
     val y1f = y + 1f
 
-    // Floor, and the cliff below its southern edge where the country ends.
+    // Floor, and the cliff below its southern edge where the land ends.
     var x = x0
     while (x <= x1) {
         if (!play[y * n + x]) {
@@ -180,7 +180,7 @@ private fun DrawScope.drawRow(
         if (!play[i]) continue
         val l = cx.toFloat()
         val r = cx + 1f
-        // Cliff faces where the country ends, facing the camera.
+        // Cliff faces where the land ends, facing the camera.
         if (y == n - 1 || !play[i + n]) {
             val a = cam.project(l, y1f)
             val b = cam.project(r, y1f)

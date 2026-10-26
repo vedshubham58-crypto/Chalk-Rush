@@ -294,7 +294,7 @@ class GameTest {
     }
 
     @Test
-    fun countryArenasKeepEveryoneInside() {
+    fun landArenasKeepEveryoneInside() {
         for (map in Maps.all) {
             val game = Game(map, Characters.all[0], seed = map.index.toLong())
             assertTrue("${map.name} should have room", game.area > 1500)

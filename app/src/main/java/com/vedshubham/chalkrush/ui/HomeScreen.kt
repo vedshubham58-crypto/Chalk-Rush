@@ -158,7 +158,7 @@ fun HomeScreen(
                         fontWeight = FontWeight.Black,
                         fontSize = 18.sp,
                     )
-                    Text("Conquer a country to unlock the next one", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                    Text("Conquer a land to unlock the next one", color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (m in Maps.all) {

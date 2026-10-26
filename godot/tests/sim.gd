@@ -34,16 +34,16 @@ func _init() -> void:
 			g.changed.clear()
 			steps += 1
 		var ms := Time.get_ticks_msec() - start
-		# Land totals add up and nobody owns a cell outside the country.
+		# Land totals add up and nobody owns a cell outside the land.
 		var counted := {}
 		for i in g.cells:
 			if g.owner[i] != NeonGame.NONE:
-				check(g.playable[i] == 1, "%s: owned cell outside the country" % lv.name)
+				check(g.playable[i] == 1, "%s: owned cell outside the land" % lv.name)
 				counted[g.owner[i]] = counted.get(g.owner[i], 0) + 1
 		for p in g.players:
 			check(counted.get(p.id, 0) == p.land, "%s: %s land count %d vs %d" % [lv.name, p.display_name(), p.land, counted.get(p.id, 0)])
 			if p.alive:
-				check(g.in_bounds(p.cell_x, p.cell_y), "%s: %s outside the country" % [lv.name, p.display_name()])
+				check(g.in_bounds(p.cell_x, p.cell_y), "%s: %s outside the land" % [lv.name, p.display_name()])
 		print("STATS %s size=%d bots=%d steps=%d kos=%d captures=%d me=%.1f%% top=%.1f%% %dms (%.2f ms/frame)" % [
 			lv.name, g.size, lv.bots, steps, kos, caps, g.percent(g.me), g.percent(g.ranking()[0]), ms, float(ms) / steps])
 		check(caps > 10, "%s: bots hardly captured anything" % lv.name)

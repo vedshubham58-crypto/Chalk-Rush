@@ -77,7 +77,7 @@ func _plan_trip(game: NeonGame, me: NeonGame.Player) -> void:
 	_legs_left = 3
 	_turn_sign = 1.0 if game.rng.randf() < 0.5 else -1.0
 	_leg_time = _leg_length(game)
-	# Head roughly toward open space in the middle of the country.
+	# Head roughly toward open space in the middle of the land.
 	_target = _angle_to(me, game.center_x, game.center_y) + (game.rng.randf() - 0.5) * PI * 1.4
 
 
