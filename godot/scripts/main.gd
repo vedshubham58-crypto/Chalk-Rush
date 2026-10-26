@@ -12,6 +12,9 @@ var paused := false
 
 # HUD parts, made when a round starts.
 var _timer_pill: PanelContainer
+var _timer_label: Label
+## The see-through arrow pads in the bottom corners; they flash when you turn.
+var _pads: Array[Control] = []
 var _percent_label: Label
 var _percent_bar: ProgressBar
 var _board: VBoxContainer
@@ -245,14 +248,33 @@ func _build_hud() -> void:
 	top.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(top)
 
-	_timer_pill = UI.pill("0:45", Color.WHITE, 34)
-	top.add_child(_timer_pill)
+	# Pause on the left and your share on the right, equally wide, so the clock sits dead centre.
+	var left := HBoxContainer.new()
+	left.custom_minimum_size = Vector2(130, 0)
+	left.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	top.add_child(left)
+	var pause := UI.icon_button("II", UI.CYAN, 72)
+	pause.pressed.connect(_toggle_pause)
+	left.add_child(pause)
 	var mid := VBoxContainer.new()
 	mid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mid.add_theme_constant_override("separation", 2)
+	mid.add_theme_constant_override("separation", 6)
+	mid.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	top.add_child(mid)
-	_percent_label = UI.label("0%", 40, game.me.color, true)
-	mid.add_child(_percent_label)
+	# A big digital stopwatch counting down to the hundredth, top and centre.
+	_timer_pill = PanelContainer.new()
+	var ts := UI.box(Color(0.02, 0.04, 0.1, 0.78), Color(UI.GREEN, 0.5), 14, 2, 8)
+	ts.content_margin_left = 26
+	ts.content_margin_right = 26
+	ts.content_margin_top = 2
+	ts.content_margin_bottom = 2
+	_timer_pill.add_theme_stylebox_override("panel", ts)
+	_timer_pill.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_timer_pill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mid.add_child(_timer_pill)
+	_timer_label = UI.glow_label("45.00", 58, UI.GREEN)
+	_timer_label.add_theme_color_override("font_color", UI.GREEN.lightened(0.3))
+	_timer_pill.add_child(_timer_label)
 	_percent_bar = ProgressBar.new()
 	_percent_bar.show_percentage = false
 	_percent_bar.custom_minimum_size = Vector2(0, 14)
@@ -263,16 +285,17 @@ func _build_hud() -> void:
 	_percent_bar.add_theme_stylebox_override("background", bg)
 	_percent_bar.add_theme_stylebox_override("fill", UI.box(game.me.color, game.me.color, 7, 0, 6))
 	mid.add_child(_percent_bar)
-	var pause := UI.icon_button("II", UI.CYAN, 72)
-	pause.pressed.connect(_toggle_pause)
-	top.add_child(pause)
+	_percent_label = UI.label("0%", 34, game.me.color, true)
+	_percent_label.custom_minimum_size = Vector2(130, 0)
+	_percent_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	top.add_child(_percent_label)
 
 	# Minimap: the whole land, with a dot for every rider.
 	var frame := PanelContainer.new()
 	var fs := UI.box(Color(0.03, 0.02, 0.1, 0.55), Color(UI.CYAN, 0.6), 18, 2, 6)
 	fs.set_content_margin_all(6)
 	frame.add_theme_stylebox_override("panel", fs)
-	frame.position = Vector2(20, 130)
+	frame.position = Vector2(20, 160)
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(frame)
 	_minimap = TextureRect.new()
@@ -300,7 +323,7 @@ func _build_hud() -> void:
 	_board.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_board.offset_left = -250
 	_board.offset_right = -20
-	_board.offset_top = 150
+	_board.offset_top = 170
 	_board.add_theme_constant_override("separation", 2)
 	_board.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(_board)
@@ -333,10 +356,10 @@ func _build_hud() -> void:
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(_feed)
 
-	_drop_btn = UI.button("▶ POWER DROP: SHIELD + BOOST", UI.GOLD, 30, 88)
+	_drop_btn = UI.button("▶ POWER DROP", UI.GOLD, 32, 88)
 	_drop_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	_drop_btn.offset_left = -230
-	_drop_btn.offset_right = 230
+	_drop_btn.offset_left = -190
+	_drop_btn.offset_right = 190
 	_drop_btn.offset_top = -200
 	_drop_btn.offset_bottom = -112
 	_drop_btn.visible = false
@@ -348,6 +371,12 @@ func _build_hud() -> void:
 	r.add_child(_drop_btn)
 	UI.breathe(_drop_btn, 0.06, 0.7)
 
+	_pads.clear()
+	for side in [-1, 1]:
+		var pad := _arrow_pad(side)
+		r.add_child(pad)
+		_pads.append(pad)
+
 	var hint := UI.label("Tap left or right to turn", 30, Color(1, 1, 1, 0.8))
 	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	hint.offset_left = -300
@@ -358,6 +387,31 @@ func _build_hud() -> void:
 	var tw := hint.create_tween()
 	tw.tween_interval(4.0)
 	tw.tween_property(hint, "modulate:a", 0.0, 0.6)
+
+
+## A see-through square with an arrow, in a bottom corner. Only a picture: a tap
+## anywhere on that half of the screen turns.
+func _arrow_pad(side: int) -> Control:
+	var pad := Panel.new()
+	pad.add_theme_stylebox_override("panel", UI.box(Color(0.75, 0.9, 1.0, 0.16), Color(1, 1, 1, 0.55), 18, 3))
+	pad.size = Vector2(124, 124)
+	pad.set_anchors_preset(Control.PRESET_BOTTOM_LEFT if side < 0 else Control.PRESET_BOTTOM_RIGHT)
+	pad.offset_top = -170
+	pad.offset_bottom = -46
+	pad.offset_left = 36 if side < 0 else -160
+	pad.offset_right = pad.offset_left + 124
+	pad.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var arrow := Polygon2D.new()
+	var pts := PackedVector2Array([Vector2(-30, -16), Vector2(4, -16), Vector2(4, -34), Vector2(36, 0), Vector2(4, 34), Vector2(4, 16), Vector2(-30, 16)])
+	if side < 0:
+		for k in pts.size():
+			pts[k].x = -pts[k].x
+	arrow.polygon = pts
+	arrow.color = Color(1, 1, 1, 0.8)
+	arrow.position = Vector2(62, 62)
+	pad.add_child(arrow)
+	pad.modulate.a = 0.75
+	return pad
 
 
 func _process(dt: float) -> void:
@@ -448,8 +502,11 @@ func _slow_motion() -> void:
 
 func _update_hud() -> void:
 	var t := game.time_left()
-	(_timer_pill.get_node("text") as Label).text = "%d:%02d" % [int(t) / 60, int(t) % 60]
-	(_timer_pill.get_node("text") as Label).add_theme_color_override("font_color", UI.PINK if t < 10.0 else Color.WHITE)
+	_timer_label.text = "%05.2f" % t
+	var tc := UI.PINK if t < 10.0 else UI.GREEN
+	_timer_label.add_theme_color_override("font_color", tc.lightened(0.3))
+	_timer_label.add_theme_color_override("font_shadow_color", Color(tc, 0.85))
+	_timer_label.add_theme_color_override("font_outline_color", Color(tc, 0.9))
 	Audio.intense(t < 10.0 and game.countdown <= 0.0)
 	var pct := game.percent(game.me)
 	_percent_label.text = "%.1f%%" % pct
@@ -547,6 +604,14 @@ func _unhandled_input(event: InputEvent) -> void:
 func _turn(side: int) -> void:
 	if _turns.size() < 2:
 		_turns.append(side)
+	if _pads.size() == 2:
+		var pad := _pads[0 if side < 0 else 1]
+		pad.modulate.a = 1.0
+		pad.pivot_offset = pad.size / 2
+		pad.scale = Vector2.ONE * 0.9
+		var tw := pad.create_tween().set_parallel(true)
+		tw.tween_property(pad, "scale", Vector2.ONE, 0.18)
+		tw.tween_property(pad, "modulate:a", 0.75, 0.3)
 
 
 func _apply_turns() -> void:

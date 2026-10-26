@@ -1,7 +1,9 @@
 class_name LightBike
 extends Node3D
-## A neon light bike with its rider, built from simple shapes. The glow does the
-## rest. It points along -Z, about one and a half cells long.
+## A chunky light bike with its rider, built from simple shapes: a bright
+## silver shell, trims in the rider's colour and a cluster of red tail lights
+## for the chase camera to look at. It points along -Z, about one and a half
+## cells long.
 
 const SHIELD_SHADER := preload("res://shaders/shield.gdshader")
 
@@ -59,13 +61,15 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	body = Node3D.new()
 	add_child(body)
 	var dark := shell_mat(c.darkened(0.82), 0.8, 0.22, c.darkened(0.6))
+	var silver := shell_mat(Color(0.84, 0.88, 0.95).lerp(c, 0.12), 0.55, 0.16, c.darkened(0.75))
+	var red := glow_mat(Color(1.0, 0.12, 0.1), 3.0)
 	var trim := glow_mat(c, 3.0)
 	var white := glow_mat(Color(1, 1, 1), 4.0)
 
 	# Wheels: glowing rims on dark hubs.
 	var rim := TorusMesh.new()
-	rim.inner_radius = 0.2
-	rim.outer_radius = 0.3
+	rim.inner_radius = 0.19
+	rim.outer_radius = 0.32
 	rim.rings = 24
 	rim.ring_segments = 8
 	var hub := CylinderMesh.new()
@@ -84,11 +88,11 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	var shell := CapsuleMesh.new()
 	shell.radius = 0.22
 	shell.height = 1.5
-	_add(shell, dark, Vector3(0, 0.42, 0), Vector3(PI / 2, 0, 0), Vector3(0.75, 1, 0.8))
+	_add(shell, silver, Vector3(0, 0.42, 0), Vector3(PI / 2, 0, 0), Vector3(0.85, 1, 0.85))
 	var nose := SphereMesh.new()
 	nose.radius = 0.24
 	nose.height = 0.48
-	_add(nose, dark, Vector3(0, 0.5, -0.42), Vector3.ZERO, Vector3(0.8, 0.7, 1.5))
+	_add(nose, silver, Vector3(0, 0.5, -0.42), Vector3.ZERO, Vector3(0.8, 0.7, 1.5))
 	# Light stripes down both sides, and along the spine.
 	var stripe := BoxMesh.new()
 	stripe.size = Vector3(0.025, 0.05, 1.15)
@@ -103,12 +107,28 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	_add(lamp, white, Vector3(0, 0.5, -0.78))
 	# The back end you see from the chase camera: a swept fin, a wide tail-light
 	# bar, and glowing fender arcs over the rear wheel.
+	var cowl := BoxMesh.new()
+	cowl.size = Vector3(0.5, 0.3, 0.32)
+	_add(cowl, silver, Vector3(0, 0.56, 0.66))
+	var cowl_trim := BoxMesh.new()
+	cowl_trim.size = Vector3(0.52, 0.04, 0.34)
+	_add(cowl_trim, trim, Vector3(0, 0.72, 0.66))
+	# Tail lights: two big pods either side and a grid of small lamps between.
+	var pod := BoxMesh.new()
+	pod.size = Vector3(0.1, 0.18, 0.04)
+	for x in [-0.2, 0.2]:
+		_add(pod, red, Vector3(x, 0.56, 0.83))
+	var lamp_small := BoxMesh.new()
+	lamp_small.size = Vector3(0.05, 0.05, 0.03)
+	for x in [-0.08, 0.0, 0.08]:
+		for y in [0.5, 0.6]:
+			_add(lamp_small, red, Vector3(x, y, 0.83))
 	var tail := BoxMesh.new()
-	tail.size = Vector3(0.34, 0.06, 0.04)
-	_add(tail, glow_mat(c, 6.0), Vector3(0, 0.52, 0.78))
+	tail.size = Vector3(0.44, 0.04, 0.04)
+	_add(tail, glow_mat(c, 6.0), Vector3(0, 0.43, 0.83))
 	var fin := PrismMesh.new()
 	fin.size = Vector3(0.04, 0.28, 0.5)
-	_add(fin, trim, Vector3(0, 0.66, 0.5), Vector3(0, 0, 0), Vector3(1, 1, 1))
+	_add(fin, trim, Vector3(0, 0.8, 0.45), Vector3(0, 0, 0), Vector3(1, 1, 1))
 	var fender := TorusMesh.new()
 	fender.inner_radius = 0.33
 	fender.outer_radius = 0.37
@@ -118,7 +138,7 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	exhaust_glow.radius = 0.06
 	exhaust_glow.height = 0.12
 	for x in [-0.1, 0.1]:
-		_add(exhaust_glow, glow_mat(c.lightened(0.4), 7.0), Vector3(x, 0.38, 0.8))
+		_add(exhaust_glow, glow_mat(c.lightened(0.4), 7.0), Vector3(x, 0.36, 0.82))
 
 	# The rider, tucked low over the bike.
 	var suit := shell_mat(Color(0.08, 0.09, 0.14), 0.4, 0.4, c.darkened(0.75))

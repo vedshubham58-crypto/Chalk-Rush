@@ -1,18 +1,19 @@
 class_name ArenaView
 extends Node3D
 ## Draws a NeonGame in 3D, seen from a chase camera behind your bike.
-## The land is one smooth glowing floor (claimed land rises in its owner's
-## colour), set in a neon city under a synthwave sky. Light walls trail every
-## bike. One cell is one unit; game y runs along world +Z.
+## The land is one glossy floor of blue glass (claimed land rises in its
+## owner's colour), set in a bright future city under a sky with a blazing
+## light gate always ahead. Light walls trail every bike. One cell is one unit; game y runs along world +Z.
 
 const FLOOR_SHADER := preload("res://shaders/floor.gdshader")
 const TRAIL_SHADER := preload("res://shaders/trail.gdshader")
 const SKY_SHADER := preload("res://shaders/sky.gdshader")
 const CITY_SHADER := preload("res://shaders/city.gdshader")
+const HAZARD_SHADER := preload("res://shaders/hazard.gdshader")
 const LAND_H := 0.35
-const TRAIL_H := 1.15
+const TRAIL_H := 0.85
 const TRAIL_W := 0.07
-const BIKE_SCALE := 1.25
+const BIKE_SCALE := 1.4
 const CLAIM_SECONDS := 0.35
 const POWER_COLORS := [Color("ffe14f"), Color("4fb7ff"), Color("ff4fd8"), Color("9bf6ff"), Color("ff5f5f")]
 const CITY_NEONS := [Color("ff2bd6"), Color("00e5ff"), Color("b57cff"), Color("ff8a2b"), Color("39ff88")]
@@ -45,6 +46,8 @@ var _cam_look := Vector3.ZERO
 var _orbit := 0.0
 var _shake := 0.0
 var _speed_lines: CPUParticles3D
+var _sky_mat: ShaderMaterial
+var _boost := 0.0
 
 
 func build(p_game: NeonGame, p_accent: Color, p_font: Font) -> void:
@@ -76,31 +79,32 @@ func _build_environment() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_SKY
 	var sky := Sky.new()
-	var sm := ShaderMaterial.new()
-	sm.shader = SKY_SHADER
-	sky.sky_material = sm
+	_sky_mat = ShaderMaterial.new()
+	_sky_mat.shader = SKY_SHADER
+	sky.sky_material = _sky_mat
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.55, 0.45, 0.85)
-	env.ambient_light_energy = 0.7
+	env.ambient_light_color = Color(0.6, 0.72, 1.0)
+	env.ambient_light_energy = 0.8
 	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.tonemap_white = 6.0
+	env.tonemap_exposure = 1.05
+	env.tonemap_white = 5.0
 	env.glow_enabled = true
-	env.glow_intensity = 0.85
+	env.glow_intensity = 0.7
 	env.glow_strength = 1.0
-	env.glow_bloom = 0.04
-	env.glow_hdr_threshold = 0.95
+	env.glow_bloom = 0.0
+	env.glow_hdr_threshold = 1.1
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_ADDITIVE
 	env.set_glow_level(0, 0.0)
 	env.set_glow_level(1, 1.0)
 	env.set_glow_level(2, 1.0)
 	env.set_glow_level(3, 0.8)
 	env.set_glow_level(4, 0.4)
-	# Haze in the distance, so far-off towers melt into the pink horizon.
+	# Bright haze in the distance, so far-off towers melt into the warm horizon.
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.45, 0.12, 0.45)
-	env.fog_density = 0.012
+	env.fog_light_color = Color(0.4, 0.55, 1.0)
+	env.fog_density = 0.006
 	env.fog_sky_affect = 0.0
 	var we := WorldEnvironment.new()
 	we.environment = env
@@ -108,13 +112,13 @@ func _build_environment() -> void:
 
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-35, 180, 0)
-	sun.light_color = Color(1.0, 0.6, 0.75)
-	sun.light_energy = 0.9
+	sun.light_color = Color(1.0, 0.85, 0.7)
+	sun.light_energy = 1.2
 	add_child(sun)
 	var fill := DirectionalLight3D.new()
 	fill.rotation_degrees = Vector3(-60, 20, 0)
-	fill.light_color = Color(0.5, 0.7, 1.0)
-	fill.light_energy = 0.5
+	fill.light_color = Color(0.55, 0.75, 1.0)
+	fill.light_energy = 0.7
 	add_child(fill)
 
 	camera = Camera3D.new()
@@ -125,24 +129,25 @@ func _build_environment() -> void:
 
 	# Streaks rushing past the camera when you go fast.
 	_speed_lines = CPUParticles3D.new()
-	_speed_lines.amount = 60
-	_speed_lines.lifetime = 0.35
+	_speed_lines.amount = 90
+	_speed_lines.lifetime = 0.3
 	_speed_lines.local_coords = true
 	_speed_lines.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
-	_speed_lines.emission_box_extents = Vector3(4, 2.5, 1)
-	_speed_lines.position = Vector3(0, 0, -9)
+	_speed_lines.emission_box_extents = Vector3(5, 3, 1)
+	_speed_lines.position = Vector3(0, -0.5, -10)
 	_speed_lines.direction = Vector3(0, 0, 1)
 	_speed_lines.spread = 0.0
 	_speed_lines.gravity = Vector3.ZERO
 	_speed_lines.initial_velocity_min = 30.0
 	_speed_lines.initial_velocity_max = 40.0
 	var streak := BoxMesh.new()
-	streak.size = Vector3(0.015, 0.015, 1.2)
+	streak.size = Vector3(0.02, 0.02, 1.8)
 	_speed_lines.mesh = streak
 	var sl := StandardMaterial3D.new()
 	sl.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	sl.albedo_color = Color(1, 1, 1, 0.5)
+	sl.albedo_color = Color(0.8, 0.95, 1.0, 0.45)
 	sl.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sl.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	_speed_lines.material_override = sl
 	_speed_lines.emitting = false
 	camera.add_child(_speed_lines)
@@ -188,21 +193,23 @@ func _build_floor() -> void:
 	slab.size = Vector2(s * 6, s * 6)
 	under.mesh = slab
 	var sea := StandardMaterial3D.new()
-	sea.albedo_color = Color(0.09, 0.05, 0.2)
-	sea.metallic = 0.9
-	sea.roughness = 0.08
+	sea.albedo_color = Color(0.03, 0.08, 0.3)
+	sea.metallic = 0.2
+	sea.roughness = 0.3
+	sea.metallic_specular = 0.2
 	sea.emission_enabled = true
-	sea.emission = Color(0.12, 0.04, 0.2)
+	sea.emission = Color(0.05, 0.14, 0.5)
 	under.material_override = sea
 	under.position = Vector3(s / 2.0, -2.5, s / 2.0)
 	add_child(under)
 	_build_cliffs()
 
 
-## Glowing rails and a dark wall all round the land's outline.
+## Hazard-striped barriers with a glowing top, and a wall below, all round the land's outline.
 func _build_cliffs() -> void:
 	var rails: Array[Transform3D] = []
 	var walls: Array[Transform3D] = []
+	var tops: Array[Transform3D] = []
 	var s := game.size
 	for i in game.playable_cells:
 		var x := i % s
@@ -212,17 +219,24 @@ func _build_cliffs() -> void:
 				continue
 			var c := Vector3(x + 0.5 + NeonGame.DX[d] * 0.5, 0, y + 0.5 + NeonGame.DY[d] * 0.5)
 			var basis := Basis() if d % 2 == 1 else Basis(Vector3.UP, PI / 2)
-			rails.append(Transform3D(basis, c + Vector3(0, 0.12, 0)))
+			var out := Vector3(NeonGame.DX[d], 0, NeonGame.DY[d]) * 0.08
+			rails.append(Transform3D(basis, c + out + Vector3(0, 0.3, 0)))
+			tops.append(Transform3D(basis, c + out + Vector3(0, 0.6, 0)))
 			walls.append(Transform3D(basis, c + Vector3(0, -1.25, 0)))
 	var rail := BoxMesh.new()
-	rail.size = Vector3(1.02, 0.1, 0.1)
-	_multi(rail, rails, LightBike.glow_mat(accent, 3.5))
+	rail.size = Vector3(1.02, 0.5, 0.16)
+	var hazard := ShaderMaterial.new()
+	hazard.shader = HAZARD_SHADER
+	_multi(rail, rails, hazard)
+	var top := BoxMesh.new()
+	top.size = Vector3(1.02, 0.08, 0.2)
+	_multi(top, tops, LightBike.glow_mat(accent, 3.5))
 	var wall := BoxMesh.new()
 	wall.size = Vector3(1.02, 2.5, 0.1)
-	var wm := LightBike.shell_mat(Color(0.08, 0.05, 0.16), 0.8, 0.2)
+	var wm := LightBike.shell_mat(Color(0.3, 0.42, 0.7), 0.7, 0.2)
 	wm.emission_enabled = true
-	wm.emission = accent.darkened(0.6)
-	wm.emission_energy_multiplier = 0.4
+	wm.emission = Color(0.15, 0.3, 0.6)
+	wm.emission_energy_multiplier = 0.6
 	_multi(wall, walls, wm)
 
 
@@ -243,7 +257,7 @@ func _multi(mesh: Mesh, xf: Array[Transform3D], mat: Material, colors: Array[Col
 	return mm
 
 
-## A ring of neon tower blocks round the land, so you ride through a city at night.
+## A ring of glass tower blocks round the land, so you ride through a bright future city.
 func _build_city() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = game.size * 31 + 7
@@ -492,7 +506,8 @@ func _sync_pickups() -> void:
 		ring.scale = Vector3.ONE * (1.0 + 0.12 * sin(t * 4.0 + k))
 
 
-## The chase camera: low behind your bike, swinging round smoothly when you turn.
+## The chase camera: low and close behind your bike, swinging round smoothly and
+## rolling into turns.
 ## While you're knocked out it circles the spot; in the menu it circles your rider.
 func _place_camera(dt: float, snap: bool) -> void:
 	var p := game.me
@@ -510,15 +525,17 @@ func _place_camera(dt: float, snap: bool) -> void:
 		pos = bike_pos + Vector3(sin(_orbit), 0, cos(_orbit)) * 9.0 + Vector3(0, 6.0, 0)
 		look = bike_pos
 	else:
-		var ease := minf(dt * 5.0, 1.0)
+		var ease := minf(dt * 7.0, 1.0)
 		_cam_yaw = _yaw[0] if snap else lerp_angle(_cam_yaw, _yaw[0], ease)
 		var fwd := Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw))
 		var fast := p.boost > 0.0 or p.grinding
-		var dist := 6.6 if not fast else 7.4
-		pos = bike_pos - fwd * dist + Vector3(0, 3.6, 0)
-		look = bike_pos + fwd * 7.0 + Vector3(0, 0.6, 0)
-		camera.fov = lerpf(camera.fov, 80.0 if fast else 70.0, minf(dt * 4.0, 1.0))
-		_speed_lines.emitting = fast and game.countdown <= 0.0
+		var dist := 4.9 if not fast else 5.7
+		pos = bike_pos - fwd * dist + Vector3(0, 2.35, 0)
+		look = bike_pos + fwd * 9.0 + Vector3(0, 0.9, 0)
+		camera.fov = lerpf(camera.fov, 84.0 if fast else 74.0, minf(dt * 4.0, 1.0))
+		_speed_lines.emitting = game.countdown <= 0.0
+		var sl := _speed_lines.material_override as StandardMaterial3D
+		sl.albedo_color.a = lerpf(sl.albedo_color.a, 0.5 if fast else 0.16, minf(dt * 4.0, 1.0))
 	if snap:
 		_cam_pos = pos
 		_cam_look = look
@@ -532,8 +549,17 @@ func _place_camera(dt: float, snap: bool) -> void:
 	# Tip the horizon a little into turns.
 	var up := Vector3.UP
 	if p.alive and not showcase:
-		up = Vector3.UP.rotated(Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw)), _lean[0] * 0.18)
+		up = Vector3.UP.rotated(Vector3(-sin(_cam_yaw), 0, -cos(_cam_yaw)), _lean[0] * 0.38)
 	camera.look_at_from_position(_cam_pos + jolt, _cam_look + jolt * 0.5, up)
+	# The sky's light gate, and its mirror in the floor, stay dead ahead.
+	var ahead := _cam_look - _cam_pos
+	ahead.y = 0.0
+	if ahead.length() > 0.01:
+		_sky_mat.set_shader_parameter("ahead", ahead.normalized())
+		_floor_mat.set_shader_parameter("ahead", ahead.normalized())
+	var fast_now := p.alive and (p.boost > 0.0 or p.grinding) and not showcase
+	_boost = lerpf(_boost, 1.0 if fast_now else 0.0, minf(dt * 3.0, 1.0))
+	_sky_mat.set_shader_parameter("speed", _boost)
 
 
 ## A burst of glowing shards, for knockouts and captures.
