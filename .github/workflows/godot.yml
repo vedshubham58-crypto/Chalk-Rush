@@ -110,7 +110,7 @@ jobs:
           echo "AdMob plugin found in the APK"
           ls -la godot/build/neon-rush.apk
           # Compressed native libraries only install if the app may extract them.
-          if unzip -v godot/build/neon-rush.apk "lib/*" | grep -q Defl; then grep -A1 -i extractNativeLibs manifest.txt | grep -q "0xffffffff"; fi
+          if unzip -v godot/build/neon-rush.apk "lib/*" | grep -q Defl; then grep -iE "extractNativeLibs.*(true|0xffffffff)" manifest.txt; fi
 
       - uses: actions/upload-artifact@v4
         with:
