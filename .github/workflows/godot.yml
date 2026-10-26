@@ -94,6 +94,15 @@ jobs:
           godot --headless --path godot --install-android-build-template --export-release "Android" build/neon-rush.apk
           ls -la godot/build
 
+      - name: Check the ads plugin is inside the APK
+        run: |
+          aapt2=$(ls $ANDROID_SDK_ROOT/build-tools/*/aapt2 | tail -1)
+          $aapt2 dump xmltree --file AndroidManifest.xml godot/build/neon-rush.apk > manifest.txt
+          grep -q "org.godotengine.plugin.v2.NeonAds" manifest.txt
+          grep -q "com.google.android.gms.ads.APPLICATION_ID" manifest.txt
+          unzip -p godot/build/neon-rush.apk 'classes*.dex' | grep -aq "com/vedshubham/neonads/NeonAds"
+          echo "AdMob plugin found in the APK"
+
       - uses: actions/upload-artifact@v4
         with:
           name: neon-rush-godot-apk
