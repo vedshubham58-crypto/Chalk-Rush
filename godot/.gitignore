@@ -1,3 +1,4 @@
 .godot/
 *.apk
 /android/
+addons/neon_ads/bin/

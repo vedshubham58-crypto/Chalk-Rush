@@ -170,6 +170,9 @@ func _init(opts: Dictionary = {}) -> void:
 		var p := Player.new(i, others[(i - 1) % others.size()], true)
 		p.brain = BotBrain.new(min_bold + rng.randf() * (max_bold - min_bold))
 		players.append(p)
+	var names := GameData.random_names(players.size() - 1, rng)
+	for k in range(1, players.size()):
+		players[k].nickname = names[k - 1]
 	for p in players:
 		_spawn(p)
 

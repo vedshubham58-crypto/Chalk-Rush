@@ -21,14 +21,23 @@ var _feed: VBoxContainer
 var _drop_btn: Button
 var _pause_menu: Control
 var _revive_card: Control
+var _minimap: TextureRect
+var _dots: Array[ColorRect] = []
 
 var _swipe_from := Vector2.ZERO
 var _swiping := false
+var _swipe_used := false
+var _turns: Array[int] = []
 var _last_count := -1
 var _ko_by_me := 0
 var _slowmo := 0.0
 var _round_over_handled := false
 var _revive_offered := false
+## Ad bookkeeping for this round: one ad when you first pause, and no ad after
+## the round if you already watched a reward video in it.
+var _pause_ad_shown := false
+var _watched_video := false
+var _revive_watching := false
 
 
 func _ready() -> void:
@@ -60,7 +69,6 @@ func _new_view(g: NeonGame, follow: bool) -> void:
 		view.queue_free()
 	game = g
 	view = ArenaView.new()
-	view.follow_me = true
 	view.showcase = not follow
 	add_child(view)
 	move_child(view, 0)
@@ -215,6 +223,9 @@ func _pick_level(step: int) -> void:
 func start_round() -> void:
 	screen = Screen.PLAYING
 	_last_count = -1
+	_pause_ad_shown = false
+	_watched_video = false
+	_turns.clear()
 	_ko_by_me = 0
 	_round_over_handled = false
 	_revive_offered = false
@@ -256,6 +267,35 @@ func _build_hud() -> void:
 	pause.pressed.connect(_toggle_pause)
 	top.add_child(pause)
 
+	# Minimap: the whole country, with a dot for every rider.
+	var frame := PanelContainer.new()
+	var fs := UI.box(Color(0.03, 0.02, 0.1, 0.55), Color(UI.CYAN, 0.6), 18, 2, 6)
+	fs.set_content_margin_all(6)
+	frame.add_theme_stylebox_override("panel", fs)
+	frame.position = Vector2(20, 130)
+	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	r.add_child(frame)
+	_minimap = TextureRect.new()
+	_minimap.texture = view.land_texture
+	_minimap.custom_minimum_size = Vector2(210, 210)
+	_minimap.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_minimap.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	var mm := ShaderMaterial.new()
+	mm.shader = preload("res://shaders/minimap.gdshader")
+	mm.set_shader_parameter("mask_tex", view.mask_texture)
+	_minimap.material = mm
+	_minimap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	frame.add_child(_minimap)
+	_dots.clear()
+	for p in game.players:
+		var d := ColorRect.new()
+		var big := p == game.me
+		d.size = Vector2(14, 14) if big else Vector2(9, 9)
+		d.color = Color.WHITE if big else p.color.lightened(0.3)
+		d.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_minimap.add_child(d)
+		_dots.append(d)
+
 	_board = VBoxContainer.new()
 	_board.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_board.offset_left = -250
@@ -293,7 +333,7 @@ func _build_hud() -> void:
 	_feed.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	r.add_child(_feed)
 
-	_drop_btn = UI.button("⚡ POWER DROP", UI.GOLD, 30, 88)
+	_drop_btn = UI.button("▶ POWER DROP: SHIELD + BOOST", UI.GOLD, 30, 88)
 	_drop_btn.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	_drop_btn.offset_left = -230
 	_drop_btn.offset_right = 230
@@ -301,12 +341,14 @@ func _build_hud() -> void:
 	_drop_btn.offset_bottom = -112
 	_drop_btn.visible = false
 	_drop_btn.pressed.connect(func():
-		game.power_drop()
-		_drop_btn.visible = false)
+		_drop_btn.visible = false
+		Ads.show_rewarded(func():
+			_watched_video = true
+			game.power_drop(), func(): pass))
 	r.add_child(_drop_btn)
 	UI.breathe(_drop_btn, 0.06, 0.7)
 
-	var hint := UI.label("Swipe to steer", 30, Color(1, 1, 1, 0.8))
+	var hint := UI.label("Tap left or right to turn", 30, Color(1, 1, 1, 0.8))
 	hint.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	hint.offset_left = -300
 	hint.offset_right = 300
@@ -327,6 +369,8 @@ func _process(dt: float) -> void:
 		_slowmo -= dt / maxf(Engine.time_scale, 0.01)
 		if _slowmo <= 0.0:
 			Engine.time_scale = 1.0
+	if screen == Screen.PLAYING:
+		_apply_turns()
 	game.update(dt)
 	_handle_events()
 	view.sync(dt)
@@ -336,7 +380,10 @@ func _process(dt: float) -> void:
 			_round_over_handled = true
 			_end_round()
 		elif not game.me.alive and not game.revived and not _revive_offered:
-			_offer_revive()
+			if Ads.rewarded_ready():
+				_offer_revive()
+			else:
+				_revive_offered = true
 
 
 func _handle_events() -> void:
@@ -413,7 +460,14 @@ func _update_hud() -> void:
 			_last_count = n
 			_big(str(n), UI.CYAN)
 			Audio.play("count")
+	if game.power_drop_offered() and not Ads.rewarded_ready():
+		game.skip_power_drop()
 	_drop_btn.visible = game.power_drop_offered()
+	var scale := _minimap.size.x / game.size
+	for k in game.players.size():
+		var p := game.players[k]
+		_dots[k].visible = p.alive
+		_dots[k].position = Vector2(p.x, p.y) * scale - _dots[k].size / 2
 
 	# Leaderboard: top four, plus you if you're not in it.
 	for c in _board.get_children():
@@ -467,27 +521,43 @@ func _unhandled_input(event: InputEvent) -> void:
 	if screen != Screen.PLAYING or paused or not game:
 		return
 	if event is InputEventScreenTouch:
-		_swiping = event.pressed
-		_swipe_from = event.position
-	elif event is InputEventScreenDrag and _swiping:
-		var d: Vector2 = event.position - _swipe_from
-		if d.length() > 28.0:
-			_steer_towards(d)
+		if event.pressed:
+			_swiping = true
 			_swipe_from = event.position
-	elif event is InputEventKey and event.pressed:
+			_swipe_used = false
+		else:
+			# A tap: left half turns left, right half turns right.
+			if _swiping and not _swipe_used:
+				_turn(-1 if event.position.x < get_viewport().get_visible_rect().size.x / 2.0 else 1)
+			_swiping = false
+	elif event is InputEventScreenDrag and _swiping and not _swipe_used:
+		var d: Vector2 = event.position - _swipe_from
+		if absf(d.x) > 40.0 and absf(d.x) > absf(d.y):
+			_turn(1 if d.x > 0 else -1)
+			_swipe_used = true
+	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.keycode:
-			KEY_RIGHT, KEY_D: game.steer(0)
-			KEY_DOWN, KEY_S: game.steer(1)
-			KEY_LEFT, KEY_A: game.steer(2)
-			KEY_UP, KEY_W: game.steer(3)
+			KEY_LEFT, KEY_A: _turn(-1)
+			KEY_RIGHT, KEY_D: _turn(1)
 			KEY_ESCAPE, KEY_P: _toggle_pause()
 
 
-func _steer_towards(d: Vector2) -> void:
-	if absf(d.x) > absf(d.y):
-		game.steer(0 if d.x > 0 else 2)
-	else:
-		game.steer(1 if d.y > 0 else 3)
+## Turns left (-1) or right (+1) of the way you're heading. Quick double taps queue
+## up, so you can zig-zag or loop back alongside your own trail.
+func _turn(side: int) -> void:
+	if _turns.size() < 2:
+		_turns.append(side)
+
+
+func _apply_turns() -> void:
+	var me := game.me
+	if _turns.is_empty() or not me.alive:
+		_turns.clear()
+		return
+	# Wait until the last turn has been taken at a cell centre.
+	if me.want != me.dir:
+		return
+	me.want = posmod(me.dir + _turns.pop_front(), 4)
 
 
 func _notification(what: int) -> void:
@@ -507,10 +577,16 @@ func _toggle_pause() -> void:
 		return
 	paused = not paused
 	if paused:
-		_pause_menu = _overlay("PAUSED", UI.CYAN, [
-			["RESUME", UI.PINK, _toggle_pause],
-			["QUIT ROUND", Color("394070"), show_menu],
-		])
+		var menu := func():
+			_pause_menu = _overlay("PAUSED", UI.CYAN, [
+				["RESUME", UI.PINK, _toggle_pause],
+				["QUIT ROUND", Color("394070"), show_menu],
+			])
+		if _pause_ad_shown:
+			menu.call()
+		else:
+			_pause_ad_shown = true
+			Ads.show_interstitial(menu)
 	elif _pause_menu:
 		_pause_menu.queue_free()
 
@@ -554,10 +630,17 @@ func _offer_revive() -> void:
 	box.add_child(info)
 	box.add_child(count)
 	_revive_card = _overlay("KNOCKED OUT", UI.PINK, [
-		["REVIVE", UI.GREEN, func():
-			game.revive()
-			_revive_card.queue_free()
-			_revive_card = null],
+		["▶ REVIVE", UI.GREEN, func():
+			_revive_watching = true
+			Ads.show_rewarded(func():
+				_watched_video = true
+				game.revive(), func():
+				_revive_watching = false
+				if _revive_card:
+					_revive_card.queue_free()
+					_revive_card = null
+				if not game.me.alive:
+					game.dead_for = NeonGame.DEATH_PAUSE)],
 		["NO THANKS", Color("394070"), func():
 			_revive_card.queue_free()
 			_revive_card = null
@@ -568,7 +651,7 @@ func _offer_revive() -> void:
 	var tick := func():
 		secs -= 1
 		count.text = str(secs)
-		if secs <= 0 and _revive_card:
+		if secs <= 0 and _revive_card and not _revive_watching:
 			_revive_card.queue_free()
 			_revive_card = null
 			game.dead_for = NeonGame.DEATH_PAUSE
@@ -587,7 +670,7 @@ func _end_round() -> void:
 	var won := game.won()
 	var lv := GameData.level(Save.level)
 	var pct := game.percent(game.me)
-	var coins := game.me.coins + int(pct) + _ko_by_me * 5 + (40 if won else 0)
+	var coins := 5 + game.me.coins + int(pct * 2.0) + _ko_by_me * 10 + (50 if won else 0)
 	if game.me.rider.perk == GameData.Perk.MORE_COINS:
 		coins = int(coins * 1.5)
 	var was_best := Save.best_level
@@ -595,6 +678,12 @@ func _end_round() -> void:
 	var xp := Save.finish_round(won, coins, _ko_by_me, game.best_streak, pct)
 	Audio.play("win" if won else "lose")
 	await get_tree().create_timer(0.6).timeout
+	# An ad between rounds, unless you already watched a video this round.
+	if not _watched_video:
+		var shown := [false]
+		Ads.show_interstitial(func(): shown[0] = true)
+		while not shown[0]:
+			await get_tree().process_frame
 
 	var r := _new_ui()
 	var shade := ColorRect.new()
@@ -649,6 +738,16 @@ func _end_round() -> void:
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(spacer)
 
+	if Ads.rewarded_ready() and coins > 0:
+		var dbl := UI.button("▶ DOUBLE COINS  +%d" % coins, UI.GOLD, 32, 104)
+		dbl.pressed.connect(func():
+			Ads.show_rewarded(func():
+				Save.coins += coins
+				Save.save()
+				dbl.text = "COINS DOUBLED!"
+				dbl.disabled = true))
+		col.add_child(dbl)
+		UI.breathe(dbl, 0.05, 0.8)
 	if won and Save.best_level > was_best:
 		var nb := UI.button("NEXT: %s ▶" % GameData.level(Save.best_level).name.to_upper(), UI.GREEN, 36, 120)
 		nb.pressed.connect(func():

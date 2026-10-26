@@ -101,9 +101,24 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	lamp.radius = 0.06
 	lamp.height = 0.12
 	_add(lamp, white, Vector3(0, 0.5, -0.78))
+	# The back end you see from the chase camera: a swept fin, a wide tail-light
+	# bar, and glowing fender arcs over the rear wheel.
 	var tail := BoxMesh.new()
-	tail.size = Vector3(0.22, 0.05, 0.04)
-	_add(tail, glow_mat(c, 5.0), Vector3(0, 0.5, 0.76))
+	tail.size = Vector3(0.34, 0.06, 0.04)
+	_add(tail, glow_mat(c, 6.0), Vector3(0, 0.52, 0.78))
+	var fin := PrismMesh.new()
+	fin.size = Vector3(0.04, 0.28, 0.5)
+	_add(fin, trim, Vector3(0, 0.66, 0.5), Vector3(0, 0, 0), Vector3(1, 1, 1))
+	var fender := TorusMesh.new()
+	fender.inner_radius = 0.33
+	fender.outer_radius = 0.37
+	for x in [-0.12, 0.12]:
+		_add(fender, trim, Vector3(x, 0.3, 0.55), Vector3(0, 0, PI / 2), Vector3(1, 1, 1))
+	var exhaust_glow := SphereMesh.new()
+	exhaust_glow.radius = 0.06
+	exhaust_glow.height = 0.12
+	for x in [-0.1, 0.1]:
+		_add(exhaust_glow, glow_mat(c.lightened(0.4), 7.0), Vector3(x, 0.38, 0.8))
 
 	# The rider, tucked low over the bike.
 	var suit := shell_mat(Color(0.08, 0.09, 0.14), 0.4, 0.4, c.darkened(0.75))
@@ -111,6 +126,13 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	torso.radius = 0.13
 	torso.height = 0.56
 	_add(torso, suit, Vector3(0, 0.78, 0.12), Vector3(-1.05, 0, 0))
+	# Light lines down the rider's back and across the shoulders.
+	var back_line := BoxMesh.new()
+	back_line.size = Vector3(0.035, 0.5, 0.02)
+	_add(back_line, trim, Vector3(0, 0.84, 0.2), Vector3(-1.05, 0, 0))
+	var shoulders := BoxMesh.new()
+	shoulders.size = Vector3(0.3, 0.035, 0.02)
+	_add(shoulders, trim, Vector3(0, 0.93, 0.0), Vector3(-1.05, 0, 0))
 	var helmet := SphereMesh.new()
 	helmet.radius = 0.15
 	helmet.height = 0.3

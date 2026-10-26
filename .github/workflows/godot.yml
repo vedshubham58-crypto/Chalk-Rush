@@ -2,9 +2,9 @@ name: Build Godot version
 
 on:
   push:
-    paths: ["godot/**", ".github/workflows/godot.yml"]
+    paths: ["godot/**", "android-ads-plugin/**", ".github/workflows/godot.yml"]
   pull_request:
-    paths: ["godot/**", ".github/workflows/godot.yml"]
+    paths: ["godot/**", "android-ads-plugin/**", ".github/workflows/godot.yml"]
   workflow_dispatch:
 
 permissions:
@@ -23,6 +23,17 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build the AdMob plugin
+        run: |
+          cd android-ads-plugin
+          gradle --no-daemon :plugin:assembleRelease
+          mkdir -p ../godot/addons/neon_ads/bin
+          cp plugin/build/outputs/aar/plugin-release.aar ../godot/addons/neon_ads/bin/neon-ads-release.aar
 
       - name: Cache Godot and export templates
         id: cache
@@ -80,7 +91,7 @@ jobs:
           GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD: android
         run: |
           mkdir -p godot/build
-          godot --headless --path godot --export-release "Android" build/neon-rush.apk
+          godot --headless --path godot --install-android-build-template --export-release "Android" build/neon-rush.apk
           ls -la godot/build
 
       - uses: actions/upload-artifact@v4
