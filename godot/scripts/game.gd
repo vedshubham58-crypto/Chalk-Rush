@@ -1,11 +1,11 @@
 class_name NeonGame
 extends RefCounted
-## The whole game: a grid of cells shaped like a country, each owned by at most
+## The whole game: a grid of cells shaped like a land, each owned by at most
 ## one rider, plus everyone's light trails. No drawing here, so it can be tested
 ## on its own (see tests/sim.gd).
 ##
 ## Only other riders can knock you out, by touching your trail while you're away
-## from home. Crossing your own trail is fine, and the country's edge is a wall.
+## from home. Crossing your own trail is fine, and the land's edge is a wall.
 
 const NONE := -1
 const SPEED := 8.5
@@ -335,7 +335,7 @@ func _is_grinding(p: Player) -> bool:
 
 
 ## Light-cycle movement: straight along the grid, turning 90 degrees only at cell
-## centres. The country's edge turns you aside instead of stopping you.
+## centres. The land's edge turns you aside instead of stopping you.
 func _move(p: Player, dt: float) -> void:
 	var remaining := speed_of(p) * dt
 	var guard := 0

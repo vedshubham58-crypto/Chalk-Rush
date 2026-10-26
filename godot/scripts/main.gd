@@ -163,7 +163,7 @@ func show_menu() -> void:
 	rrow.add_child(next)
 	var owned: bool = Save.selected in Save.unlocked
 
-	# Country picker.
+	# Land picker.
 	var lc := UI.card(lv.accent)
 	col.add_child(lc)
 	var lrow := HBoxContainer.new()
@@ -179,7 +179,7 @@ func show_menu() -> void:
 	var star := " ★" if Save.level in Save.conquered else ""
 	linfo.add_child(UI.label("LEVEL %d / %d%s" % [Save.level + 1, GameData.LEVELS.size(), star], 24, Color(1, 1, 1, 0.75)))
 	linfo.add_child(UI.label(lv.name.to_upper(), 40, lv.accent, true))
-	linfo.add_child(UI.label("Claim %d%% of the country to win" % int(lv.win), 22, Color(1, 1, 1, 0.7)))
+	linfo.add_child(UI.label("Claim %d%% of the land to win" % int(lv.win), 22, Color(1, 1, 1, 0.7)))
 	var lnext := UI.icon_button("▶", lv.accent, 76)
 	lnext.disabled = Save.level >= Save.best_level
 	lnext.pressed.connect(func(): _pick_level(1))
@@ -267,7 +267,7 @@ func _build_hud() -> void:
 	pause.pressed.connect(_toggle_pause)
 	top.add_child(pause)
 
-	# Minimap: the whole country, with a dot for every rider.
+	# Minimap: the whole land, with a dot for every rider.
 	var frame := PanelContainer.new()
 	var fs := UI.box(Color(0.03, 0.02, 0.1, 0.55), Color(UI.CYAN, 0.6), 18, 2, 6)
 	fs.set_content_margin_all(6)

@@ -1,5 +1,5 @@
 extends Node
-## Your progress, kept on the phone: coins, riders, countries, stats.
+## Your progress, kept on the phone: coins, riders, lands, stats.
 
 const PATH := "user://save.cfg"
 const XP_PER_LEVEL := 120
@@ -7,7 +7,7 @@ const XP_PER_LEVEL := 120
 var coins := 0
 var selected := 0
 var unlocked: Array = [0]
-## The country you're playing now, and the furthest one you've reached.
+## The land you're playing now, and the furthest one you've reached.
 var level := 0
 var best_level := 0
 var conquered: Array = []

@@ -101,7 +101,7 @@ class Game(
     private val botSpeed: Float = 1f,
     /** Owning this much of the board wins the round straight away. */
     val winPercent: Float = 101f,
-    /** Which cells are inside the arena (a country's shape); null means the whole square. */
+    /** Which cells are inside the arena (a land's shape); null means the whole square. */
     mask: BooleanArray? = null,
     /** Bike upgrades for "you": extra speed (0.04 = 4% faster) and extra seconds of spawn shield. */
     private val mySpeedBonus: Float = 0f,
@@ -368,7 +368,7 @@ class Game(
         val b = (p.dir + 3) % 4
         val roomA = roomTo(p, a)
         val roomB = roomTo(p, b)
-        // Boxed in on three sides (a narrow tip of the country): turn back.
+        // Boxed in on three sides (a narrow tip of the land): turn back.
         if (roomA == 0 && roomB == 0) return (p.dir + 2) % 4
         return if (roomA >= roomB) a else b
     }
@@ -446,7 +446,7 @@ class Game(
             push(k * size)
             push(k * size + size - 1)
         }
-        // Everything outside the country counts as outside the loop too.
+        // Everything outside the land counts as outside the loop too.
         if (area < cells) for (i in 0 until cells) if (!playable[i]) push(i)
         while (head < tail) {
             val i = fillQueue[head++]

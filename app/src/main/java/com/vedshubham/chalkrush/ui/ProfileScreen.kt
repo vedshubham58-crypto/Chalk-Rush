@@ -65,7 +65,7 @@ fun LevelBar(profile: Profile, modifier: Modifier = Modifier) {
 }
 
 /**
- * Your rider profile: username, emblem, level, stats, conquered countries and
+ * Your rider profile: username, emblem, level, stats, conquered lands and
  * bike upgrades. With [firstTime] it's the welcome screen that asks for a name.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -146,7 +146,7 @@ fun ProfileScreen(
                     StatChip("Streak", "${profile.bestWinStreak}")
                 }
 
-                Text("COUNTRIES CONQUERED  ${profile.conquered.size}/${Maps.all.size}", color = NeonYellow, fontWeight = FontWeight.Black)
+                Text("LANDS CONQUERED  ${profile.conquered.size}/${Maps.all.size}", color = NeonYellow, fontWeight = FontWeight.Black)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     for (m in Maps.all) {
                         val won = m.index in profile.conquered
