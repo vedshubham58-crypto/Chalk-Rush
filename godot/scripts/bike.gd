@@ -1,11 +1,19 @@
 class_name LightBike
 extends Node3D
-## A chunky light bike with its rider, built from simple shapes: a bright
-## silver shell, trims in the rider's colour and a cluster of red tail lights
-## for the chase camera to look at. It points along -Z, about one and a half
-## cells long.
+## A futuristic light bike with its rider, built from simple shapes: hubless
+## wheels of light, a long silver hull with blade fairings, an energy core, a
+## rear wing over twin thrusters and red tail lights for the chase camera to
+## look at. It points along -Z, about one and a half cells long.
 
 const SHIELD_SHADER := preload("res://shaders/shield.gdshader")
+const HULL_SHADER := preload("res://shaders/bike_hull.gdshader")
+## The hull's side view, nose to tail: [z, half width, bottom, top].
+const HULL_PROFILE := [
+	[-1.25, 0.02, 0.64, 0.66], [-1.05, 0.11, 0.58, 0.74], [-0.75, 0.16, 0.6, 0.84],
+	[-0.45, 0.19, 0.62, 0.92], [-0.15, 0.18, 0.56, 0.9], [0.15, 0.16, 0.52, 0.84],
+	[0.45, 0.19, 0.58, 0.9], [0.75, 0.22, 0.62, 0.96], [1.0, 0.22, 0.64, 0.96],
+	[1.08, 0.18, 0.68, 0.92],
+]
 
 var color := Color.CYAN
 var body: Node3D
@@ -66,108 +74,176 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	var trim := glow_mat(c, 3.0)
 	var white := glow_mat(Color(1, 1, 1), 4.0)
 
-	# Wheels: glowing rims on dark hubs.
-	var rim := TorusMesh.new()
-	rim.inner_radius = 0.19
-	rim.outer_radius = 0.32
-	rim.rings = 24
-	rim.ring_segments = 8
-	var hub := CylinderMesh.new()
-	hub.top_radius = 0.21
-	hub.bottom_radius = 0.21
-	hub.height = 0.1
-	for z in [-0.55, 0.55]:
+	var glass := shell_mat(Color(0.02, 0.03, 0.08), 0.9, 0.05, c.darkened(0.3))
+	var core_glow := glow_mat(c.lightened(0.25), 6.0)
+
+	# Hubless wheels: a dark tyre round an open ring of light, with tread lights
+	# that spin and a faint energy disc where the hub would be.
+	var tyre := TorusMesh.new()
+	tyre.inner_radius = 0.245
+	tyre.outer_radius = 0.34
+	tyre.rings = 32
+	tyre.ring_segments = 10
+	var inner := TorusMesh.new()
+	inner.inner_radius = 0.205
+	inner.outer_radius = 0.245
+	inner.rings = 32
+	inner.ring_segments = 6
+	var tread := BoxMesh.new()
+	tread.size = Vector3(0.1, 0.02, 0.06)
+	var disc := CylinderMesh.new()
+	disc.top_radius = 0.21
+	disc.bottom_radius = 0.21
+	disc.height = 0.01
+	var disc_mat := StandardMaterial3D.new()
+	disc_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	disc_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	disc_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	disc_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	disc_mat.albedo_color = Color(c, 0.22)
+	for z in [-0.6, 0.6]:
 		var w := Node3D.new()
-		w.position = Vector3(0, 0.3, z)
+		w.position = Vector3(0, 0.34, z)
 		body.add_child(w)
-		_add(rim, trim, Vector3.ZERO, Vector3(0, 0, PI / 2), Vector3.ONE, w)
-		_add(hub, dark, Vector3.ZERO, Vector3(0, 0, PI / 2), Vector3.ONE, w)
-		wheels.append(w.get_child(1))
+		_add(inner, glow_mat(c, 4.5), Vector3.ZERO, Vector3(0, 0, PI / 2), Vector3.ONE, w)
+		var spin := _add(tyre, dark, Vector3.ZERO, Vector3(0, 0, PI / 2), Vector3.ONE, w)
+		wheels.append(spin)
+		for k in 6:
+			var a := k * TAU / 6.0
+			_add(tread, glow_mat(c.lightened(0.5), 3.0), Vector3(0, cos(a) * 0.335, sin(a) * 0.335), Vector3(a, 0, 0), Vector3.ONE, w)
+		_add(disc, disc_mat, Vector3.ZERO, Vector3(0, 0, PI / 2), Vector3.ONE, w)
 
-	# The long shell that wraps over both wheels.
-	var shell := CapsuleMesh.new()
-	shell.radius = 0.22
-	shell.height = 1.5
-	_add(shell, silver, Vector3(0, 0.42, 0), Vector3(PI / 2, 0, 0), Vector3(0.85, 1, 0.85))
-	var nose := SphereMesh.new()
-	nose.radius = 0.24
-	nose.height = 0.48
-	_add(nose, silver, Vector3(0, 0.5, -0.42), Vector3.ZERO, Vector3(0.8, 0.7, 1.5))
-	# Light stripes down both sides, and along the spine.
-	var stripe := BoxMesh.new()
-	stripe.size = Vector3(0.025, 0.05, 1.15)
-	for x in [-0.165, 0.165]:
-		_add(stripe, trim, Vector3(x, 0.44, 0.02))
-	var spine := BoxMesh.new()
-	spine.size = Vector3(0.05, 0.03, 0.6)
-	_add(spine, trim, Vector3(0, 0.6, 0.35))
-	var lamp := SphereMesh.new()
-	lamp.radius = 0.06
-	lamp.height = 0.12
-	_add(lamp, white, Vector3(0, 0.5, -0.78))
-	# The back end you see from the chase camera: a swept fin, a wide tail-light
-	# bar, and glowing fender arcs over the rear wheel.
-	var cowl := BoxMesh.new()
-	cowl.size = Vector3(0.5, 0.3, 0.32)
-	_add(cowl, silver, Vector3(0, 0.56, 0.66))
-	var cowl_trim := BoxMesh.new()
-	cowl_trim.size = Vector3(0.52, 0.04, 0.34)
-	_add(cowl_trim, trim, Vector3(0, 0.72, 0.66))
-	# Tail lights: two big pods either side and a grid of small lamps between.
-	var pod := BoxMesh.new()
-	pod.size = Vector3(0.1, 0.18, 0.04)
-	for x in [-0.2, 0.2]:
-		_add(pod, red, Vector3(x, 0.56, 0.83))
-	var lamp_small := BoxMesh.new()
-	lamp_small.size = Vector3(0.05, 0.05, 0.03)
-	for x in [-0.08, 0.0, 0.08]:
-		for y in [0.5, 0.6]:
-			_add(lamp_small, red, Vector3(x, y, 0.83))
-	var tail := BoxMesh.new()
-	tail.size = Vector3(0.44, 0.04, 0.04)
-	_add(tail, glow_mat(c, 6.0), Vector3(0, 0.43, 0.83))
-	var fin := PrismMesh.new()
-	fin.size = Vector3(0.04, 0.28, 0.5)
-	_add(fin, trim, Vector3(0, 0.8, 0.45), Vector3(0, 0, 0), Vector3(1, 1, 1))
-	var fender := TorusMesh.new()
-	fender.inner_radius = 0.33
-	fender.outer_radius = 0.37
+	# A sculpted hull lofted from nose to tail: low wedge nose, a tank that
+	# rises over the front wheel, a dip for the seat and a high, wide tail.
+	var hull := MeshInstance3D.new()
+	hull.mesh = _hull_mesh()
+	var hm := ShaderMaterial.new()
+	hm.shader = HULL_SHADER
+	hm.set_shader_parameter("base", Color(0.86, 0.9, 0.97).lerp(c, 0.12))
+	hm.set_shader_parameter("glow", c)
+	hull.material_override = hm
+	hull.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	body.add_child(hull)
+	# Underglow strip and the energy core between the wheels.
+	var under := BoxMesh.new()
+	under.size = Vector3(0.1, 0.02, 1.2)
+	_add(under, glow_mat(c, 5.0), Vector3(0, 0.53, 0))
+	var core := SphereMesh.new()
+	core.radius = 0.1
+	core.height = 0.2
+	_add(core, core_glow, Vector3(0, 0.46, 0))
+	# Dark glass windscreen, and V-shaped headlight strips on the nose.
+	var screen := SphereMesh.new()
+	screen.radius = 0.5
+	screen.height = 1.0
+	_add(screen, glass, Vector3(0, 0.9, -0.62), Vector3(0.2, 0, 0), Vector3(0.26, 0.14, 0.55))
+	var head := BoxMesh.new()
+	head.size = Vector3(0.18, 0.02, 0.02)
+	for x in [-0.08, 0.08]:
+		_add(head, white, Vector3(x * 0.8, 0.66, -1.12), Vector3(0, 0.6 * signf(x), 0))
+
+	# The back end the chase camera looks at: a rear wing on two struts, twin
+	# thrusters and a cluster of red tail lights.
+	var strut := BoxMesh.new()
+	strut.size = Vector3(0.03, 0.22, 0.08)
 	for x in [-0.12, 0.12]:
-		_add(fender, trim, Vector3(x, 0.3, 0.55), Vector3(0, 0, PI / 2), Vector3(1, 1, 1))
-	var exhaust_glow := SphereMesh.new()
-	exhaust_glow.radius = 0.06
-	exhaust_glow.height = 0.12
-	for x in [-0.1, 0.1]:
-		_add(exhaust_glow, glow_mat(c.lightened(0.4), 7.0), Vector3(x, 0.36, 0.82))
+		_add(strut, silver, Vector3(x, 1.02, 0.9), Vector3(-0.3, 0, 0))
+	var wing := BoxMesh.new()
+	wing.size = Vector3(0.62, 0.035, 0.16)
+	_add(wing, silver, Vector3(0, 1.12, 0.94))
+	var wing_edge := BoxMesh.new()
+	wing_edge.size = Vector3(0.64, 0.02, 0.02)
+	_add(wing_edge, glow_mat(c, 6.0), Vector3(0, 1.12, 1.02))
+	var thruster := CylinderMesh.new()
+	thruster.top_radius = 0.06
+	thruster.bottom_radius = 0.08
+	thruster.height = 0.3
+	var nozzle := SphereMesh.new()
+	nozzle.radius = 0.055
+	nozzle.height = 0.11
+	for x in [-0.2, 0.2]:
+		_add(thruster, silver, Vector3(x, 0.6, 0.9), Vector3(PI / 2, 0, 0))
+		_add(nozzle, glow_mat(c.lightened(0.4), 7.0), Vector3(x, 0.6, 1.05))
+	var pod := BoxMesh.new()
+	pod.size = Vector3(0.07, 0.035, 0.03)
+	for x in [-0.07, 0.07]:
+		for y in [0.76, 0.84]:
+			_add(pod, red, Vector3(x, y, 1.085))
+	var tail := BoxMesh.new()
+	tail.size = Vector3(0.3, 0.025, 0.03)
+	_add(tail, red, Vector3(0, 0.7, 1.085))
 
-	# The rider, tucked low over the bike.
-	var suit := shell_mat(Color(0.08, 0.09, 0.14), 0.4, 0.4, c.darkened(0.75))
+	# The rider: an armoured pilot tucked low over the hull, in a dark suit with
+	# silver plates, light lines, a glowing back core and a finned helmet.
+	# Built on its own node, lifted to sit on the hull's seat.
+	var bike_body := body
+	body = Node3D.new()
+	body.position = Vector3(0, 0.1, 0.0)
+	bike_body.add_child(body)
+	var suit := shell_mat(Color(0.16, 0.18, 0.26), 0.7, 0.3, c.darkened(0.6))
+	var plate := shell_mat(Color(0.86, 0.9, 0.97).lerp(c, 0.2), 0.6, 0.15, c.darkened(0.6))
 	var torso := CapsuleMesh.new()
 	torso.radius = 0.13
 	torso.height = 0.56
-	_add(torso, suit, Vector3(0, 0.78, 0.12), Vector3(-1.05, 0, 0))
-	# Light lines down the rider's back and across the shoulders.
+	_add(torso, suit, Vector3(0, 0.86, 0.2), Vector3(-1.1, 0, 0))
+	var back := BoxMesh.new()
+	back.size = Vector3(0.24, 0.36, 0.06)
+	_add(back, plate, Vector3(0, 0.96, 0.24), Vector3(-1.1, 0, 0))
 	var back_line := BoxMesh.new()
-	back_line.size = Vector3(0.035, 0.5, 0.02)
-	_add(back_line, trim, Vector3(0, 0.84, 0.2), Vector3(-1.05, 0, 0))
-	var shoulders := BoxMesh.new()
-	shoulders.size = Vector3(0.3, 0.035, 0.02)
-	_add(shoulders, trim, Vector3(0, 0.93, 0.0), Vector3(-1.05, 0, 0))
+	back_line.size = Vector3(0.02, 0.34, 0.02)
+	for x in [-0.075, 0.075]:
+		_add(back_line, trim, Vector3(x, 0.995, 0.25), Vector3(-1.1, 0, 0))
+	var back_core := SphereMesh.new()
+	back_core.radius = 0.045
+	back_core.height = 0.09
+	_add(back_core, core_glow, Vector3(0, 1.0, 0.3))
+	var pad := SphereMesh.new()
+	pad.radius = 0.5
+	pad.height = 1.0
+	var pad_edge := BoxMesh.new()
+	pad_edge.size = Vector3(0.02, 0.02, 0.18)
+	for x in [-0.155, 0.155]:
+		_add(pad, plate, Vector3(x, 0.99, 0.04), Vector3.ZERO, Vector3(0.2, 0.12, 0.24))
+		_add(pad_edge, trim, Vector3(x * 1.35, 0.98, 0.04))
+	var arm := CapsuleMesh.new()
+	arm.radius = 0.05
+	arm.height = 0.44
+	var glove := SphereMesh.new()
+	glove.radius = 0.05
+	glove.height = 0.1
+	for x in [-0.15, 0.15]:
+		_add(arm, plate, Vector3(x, 0.85, -0.12), Vector3(-1.0, 0, 0))
+		_add(glove, trim, Vector3(x * 0.95, 0.76, -0.33))
+	var thigh := CapsuleMesh.new()
+	thigh.radius = 0.065
+	thigh.height = 0.44
+	var boot := BoxMesh.new()
+	boot.size = Vector3(0.07, 0.07, 0.2)
+	var boot_line := BoxMesh.new()
+	boot_line.size = Vector3(0.075, 0.015, 0.2)
+	for x in [-0.15, 0.15]:
+		_add(thigh, suit, Vector3(x * 1.3, 0.8, 0.5), Vector3(-1.35, 0, 0))
+		_add(boot, plate, Vector3(x * 1.55, 0.72, 0.72))
+		_add(boot_line, trim, Vector3(x * 1.55, 0.69, 0.72))
 	var helmet := SphereMesh.new()
 	helmet.radius = 0.15
 	helmet.height = 0.3
-	_add(helmet, shell_mat(c.darkened(0.45), 0.9, 0.15, c.darkened(0.5)), Vector3(0, 0.92, -0.17))
-	var visor := BoxMesh.new()
-	visor.size = Vector3(0.22, 0.06, 0.06)
-	_add(visor, white, Vector3(0, 0.94, -0.3))
-	var crest := BoxMesh.new()
-	crest.size = Vector3(0.03, 0.04, 0.28)
-	_add(crest, trim, Vector3(0, 1.06, -0.15))
-	var arm := CapsuleMesh.new()
-	arm.radius = 0.05
-	arm.height = 0.42
-	for x in [-0.14, 0.14]:
-		_add(arm, suit, Vector3(x, 0.72, -0.18), Vector3(-0.9, 0, 0))
+	_add(helmet, plate, Vector3(0, 1.0, -0.14), Vector3.ZERO, Vector3(0.9, 0.85, 1.3))
+	var visor := SphereMesh.new()
+	visor.radius = 0.5
+	visor.height = 1.0
+	_add(visor, glass, Vector3(0, 0.99, -0.24), Vector3.ZERO, Vector3(0.25, 0.14, 0.2))
+	var visor_band := BoxMesh.new()
+	visor_band.size = Vector3(0.24, 0.025, 0.06)
+	_add(visor_band, white, Vector3(0, 1.0, -0.33))
+	var crest := PrismMesh.new()
+	crest.size = Vector3(0.12, 0.3, 0.025)
+	_add(crest, trim, Vector3(0, 1.12, -0.1), Vector3(-PI / 2, 0, 0), Vector3(0.3, 1, 2.5))
+	var ear := BoxMesh.new()
+	ear.size = Vector3(0.02, 0.05, 0.1)
+	for x in [-0.135, 0.135]:
+		_add(ear, trim, Vector3(x, 1.0, -0.12))
+	body = bike_body
 	# A soft pool of light on the ground under the bike.
 	var pool := QuadMesh.new()
 	pool.size = Vector2(1.6, 2.4)
@@ -220,7 +296,7 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 	exhaust.lifetime = 0.45
 	exhaust.emitting = false
 	exhaust.local_coords = false
-	exhaust.position = Vector3(0, 0.35, 0.8)
+	exhaust.position = Vector3(0, 0.6, 1.1)
 	exhaust.direction = Vector3(0, 0.4, 1)
 	exhaust.spread = 25.0
 	exhaust.initial_velocity_min = 2.0
@@ -266,6 +342,60 @@ func setup(c: Color, name_text := "", font: Font = null) -> void:
 		var a := k * TAU / 5.0
 		var s := _add(spike, gold, Vector3(sin(a) * 0.18, 0.12, cos(a) * 0.18), Vector3(0, a, 0), Vector3.ONE, crown)
 		s.rotation.y = a
+
+
+## Lofts [constant HULL_PROFILE] into a smooth closed hull. Each slice is a
+## rounded-square cross-section; UV.x runs round it and UV.y nose to tail.
+static func _hull_mesh() -> ArrayMesh:
+	var slices: Array = []
+	var steps := 4
+	for k in HULL_PROFILE.size() - 1:
+		var a: Array = HULL_PROFILE[maxi(k - 1, 0)]
+		var b: Array = HULL_PROFILE[k]
+		var c2: Array = HULL_PROFILE[k + 1]
+		var d: Array = HULL_PROFILE[mini(k + 2, HULL_PROFILE.size() - 1)]
+		for n in steps:
+			var t := float(n) / steps
+			var row: Array[float] = []
+			for j in 4:
+				row.append(cubic_interpolate(b[j], c2[j], a[j], d[j], t))
+			slices.append(row)
+	slices.append(HULL_PROFILE[-1])
+	var ring := 24
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var z0: float = HULL_PROFILE[0][0]
+	var z1: float = HULL_PROFILE[-1][0]
+	var pts: Array = []
+	for s in slices:
+		var row: Array[Vector3] = []
+		var mid: float = (s[2] + s[3]) * 0.5
+		var h: float = (s[3] - s[2]) * 0.5
+		for r in ring + 1:
+			var th := r * TAU / ring
+			var cx := cos(th)
+			var sy := sin(th)
+			row.append(Vector3(s[1] * signf(cx) * pow(absf(cx), 0.6), mid + h * signf(sy) * pow(absf(sy), 0.6), s[0]))
+		pts.append(row)
+	for i in pts.size() - 1:
+		var va: float = (slices[i][0] - z0) / (z1 - z0)
+		var vb: float = (slices[i + 1][0] - z0) / (z1 - z0)
+		for r in ring:
+			var ua := float(r) / ring
+			var ub := float(r + 1) / ring
+			var quad := [[pts[i][r], ua, va], [pts[i + 1][r], ua, vb], [pts[i + 1][r + 1], ub, vb], [pts[i][r + 1], ub, va]]
+			for idx in [0, 2, 1, 0, 3, 2]:
+				st.set_uv(Vector2(quad[idx][1], quad[idx][2]))
+				st.add_vertex(quad[idx][0])
+	# Cap the tail.
+	var last: Array = pts[-1]
+	var centre := Vector3(0, (slices[-1][2] + slices[-1][3]) * 0.5, slices[-1][0])
+	for r in ring:
+		for v in [centre, last[r + 1], last[r]]:
+			st.set_uv(Vector2(0.75, 1.0))
+			st.add_vertex(v)
+	st.generate_normals()
+	return st.commit()
 
 
 func _radial() -> GradientTexture2D:
