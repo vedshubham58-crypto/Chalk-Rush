@@ -6,6 +6,8 @@ enum Screen { MENU, PLAYING, RESULTS }
 var screen := Screen.MENU
 var game: NeonGame
 var view: ArenaView
+## The lobby's 3D backdrop: your bike on a turntable in the launch bay.
+var bay: LaunchBay
 var ui: CanvasLayer
 var root_ui: Control
 var paused := false
@@ -48,7 +50,10 @@ func _ready() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
 	get_tree().root.size_changed.connect(_fit_ui)
-	show_menu()
+	if Save.seen_story:
+		show_menu()
+	else:
+		show_story()
 
 
 func _fit_ui() -> void:
@@ -68,8 +73,7 @@ func _new_ui() -> Control:
 
 
 func _new_view(g: NeonGame, follow: bool) -> void:
-	if view:
-		view.queue_free()
+	_clear_scene()
 	game = g
 	view = ArenaView.new()
 	view.showcase = not follow
@@ -95,6 +99,43 @@ func _make_game(attract: bool) -> NeonGame:
 	return g
 
 
+## Removes the 3D scene behind the UI: the round's arena or the lobby's launch bay.
+func _clear_scene() -> void:
+	if view:
+		view.queue_free()
+		view = null
+	if bay:
+		bay.queue_free()
+		bay = null
+	game = null
+
+
+func _show_bay() -> void:
+	_clear_scene()
+	var rider := GameData.rider(Save.selected)
+	bay = LaunchBay.new()
+	add_child(bay)
+	move_child(bay, 0)
+	bay.build(rider.color, GameData.level(Save.level).accent, rider.name)
+
+
+# ---------------------------------------------------------------- story
+
+## The story intro: shown on first launch, and from the lobby's STORY button.
+func show_story() -> void:
+	screen = Screen.MENU
+	if not bay:
+		_show_bay()
+	Audio.music("menu")
+	var r := _new_ui()
+	var story := StoryScreen.new()
+	r.add_child(story)
+	story.finished.connect(func():
+		Save.seen_story = true
+		Save.save()
+		show_menu())
+
+
 # ---------------------------------------------------------------- menu
 
 func show_menu() -> void:
@@ -102,17 +143,28 @@ func show_menu() -> void:
 	paused = false
 	get_tree().paused = false
 	Engine.time_scale = 1.0
-	_new_view(_make_game(true), false)
+	_show_bay()
 	Audio.music("menu")
 	var r := _new_ui()
 	var lv := GameData.level(Save.level)
 	var rider := GameData.rider(Save.selected)
 
-	var shade := ColorRect.new()
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.05, 0.25)
-	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	r.add_child(shade)
+	# Light vignettes top and bottom so the text and cards stand out from the bay.
+	for top_side in [true, false]:
+		var fade := TextureRect.new()
+		var g := GradientTexture2D.new()
+		g.gradient = Gradient.new()
+		g.gradient.set_color(0, Color(0.0, 0.02, 0.12, 0.7))
+		g.gradient.set_color(1, Color(0.0, 0.02, 0.12, 0.0))
+		g.fill_from = Vector2(0, 0) if top_side else Vector2(0, 1)
+		g.fill_to = Vector2(0, 1) if top_side else Vector2(0, 0)
+		fade.texture = g
+		fade.stretch_mode = TextureRect.STRETCH_SCALE
+		fade.set_anchors_preset(Control.PRESET_TOP_WIDE if top_side else Control.PRESET_BOTTOM_WIDE)
+		fade.offset_top = 0 if top_side else -620
+		fade.offset_bottom = 380 if top_side else 0
+		fade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		r.add_child(fade)
 
 	var col := VBoxContainer.new()
 	col.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -131,6 +183,10 @@ func show_menu() -> void:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(gap)
+	var story := UI.button("STORY", Color("394070"), 24, 72)
+	story.custom_minimum_size.x = 130
+	story.pressed.connect(show_story)
+	top.add_child(story)
 	var snd := UI.icon_button("♪" if Save.sound else "×", UI.CYAN, 72)
 	snd.pressed.connect(func():
 		Audio.set_sound(not Save.sound)
@@ -140,8 +196,10 @@ func show_menu() -> void:
 	var title := UI.glow_label("NEON\nRUSH", 104, UI.PINK)
 	title.add_theme_constant_override("line_spacing", -24)
 	col.add_child(title)
-	var tag := UI.label("Ride. Loop. Claim the world.", 30, UI.CYAN)
+	var tag := UI.label("LIGHT BIKE LAND WARS", 28, UI.CYAN, true)
 	col.add_child(tag)
+	var sub := UI.label("Loop the land. Cut their trails. Rule the Grid.", 24, Color(1, 1, 1, 0.85))
+	col.add_child(sub)
 
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL

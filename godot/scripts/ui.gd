@@ -65,6 +65,13 @@ static func box(bg: Color, border := Color.TRANSPARENT, radius := 22, border_w :
 	return s
 
 
+## A box with its corners cut off at an angle, for a sharper sci-fi look.
+static func chamfer(bg: Color, border := Color.TRANSPARENT, cut := 22, border_w := 0, glow := 0) -> StyleBoxFlat:
+	var s := box(bg, border, cut, border_w, glow)
+	s.corner_detail = 1
+	return s
+
+
 static func button(text: String, color := PINK, size := 34, min_h := 96) -> Button:
 	fonts()
 	var b := Button.new()
@@ -78,10 +85,10 @@ static func button(text: String, color := PINK, size := 34, min_h := 96) -> Butt
 	b.add_theme_color_override("font_disabled_color", Color(1, 1, 1, 0.35))
 	b.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.5))
 	b.add_theme_constant_override("outline_size", 6)
-	b.add_theme_stylebox_override("normal", box(color.darkened(0.25), color.lightened(0.35), 26, 3, 14))
-	b.add_theme_stylebox_override("hover", box(color.darkened(0.15), color.lightened(0.5), 26, 3, 18))
-	b.add_theme_stylebox_override("pressed", box(color.darkened(0.45), color.lightened(0.2), 26, 3, 6))
-	b.add_theme_stylebox_override("disabled", box(Color(0.2, 0.22, 0.3, 0.7), Color(0.4, 0.42, 0.5), 26, 2, 0))
+	b.add_theme_stylebox_override("normal", chamfer(color.darkened(0.25), color.lightened(0.35), 26, 3, 14))
+	b.add_theme_stylebox_override("hover", chamfer(color.darkened(0.15), color.lightened(0.5), 26, 3, 18))
+	b.add_theme_stylebox_override("pressed", chamfer(color.darkened(0.45), color.lightened(0.2), 26, 3, 6))
+	b.add_theme_stylebox_override("disabled", chamfer(Color(0.2, 0.22, 0.3, 0.7), Color(0.4, 0.42, 0.5), 26, 2, 0))
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.pressed.connect(func(): Audio.play("click"))
 	return b
@@ -94,6 +101,7 @@ static func icon_button(text: String, color := CYAN, size := 80) -> Button:
 	for s in ["normal", "hover", "pressed", "disabled"]:
 		var st: StyleBoxFlat = b.get_theme_stylebox(s).duplicate()
 		st.set_corner_radius_all(size / 2)
+		st.corner_detail = 8
 		st.bg_color = Color(color.darkened(0.7), 0.85) if s != "disabled" else Color(0.1, 0.1, 0.15, 0.5)
 		st.content_margin_left = 0
 		st.content_margin_right = 0
@@ -103,7 +111,7 @@ static func icon_button(text: String, color := CYAN, size := 80) -> Button:
 
 static func card(color := CYAN) -> PanelContainer:
 	var p := PanelContainer.new()
-	p.add_theme_stylebox_override("panel", box(CARD, Color(color, 0.7), 26, 2, 10))
+	p.add_theme_stylebox_override("panel", chamfer(CARD, Color(color, 0.7), 26, 2, 10))
 	return p
 
 
