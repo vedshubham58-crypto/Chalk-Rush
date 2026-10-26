@@ -77,6 +77,8 @@ def main():
     ap.add_argument("--cta", default="Coming soon on Google Play")
     ap.add_argument("--date", default=datetime.date.today().isoformat())
     a = ap.parse_args()
+    # Godot runs inside the project folder, so give it absolute paths.
+    a.out = os.path.abspath(a.out)
     os.makedirs(a.out, exist_ok=True)
     day = datetime.date.fromisoformat(a.date).toordinal()
     rnd = random.Random(day)
