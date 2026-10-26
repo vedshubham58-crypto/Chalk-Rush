@@ -48,6 +48,8 @@ var _powers_taken := 0
 var _loops_closed := 0
 ## The daily reward pops up by itself once per app start.
 var _daily_offered := false
+## Set when started for recording a Short (see promo.gd).
+var promo: Promo
 
 
 func _ready() -> void:
@@ -55,7 +57,10 @@ func _ready() -> void:
 	ui = CanvasLayer.new()
 	add_child(ui)
 	get_tree().root.size_changed.connect(_fit_ui)
-	if Save.seen_story:
+	if Promo.wanted():
+		promo = Promo.new(self)
+		add_child(promo)
+	elif Save.seen_story:
 		show_menu()
 	else:
 		show_story()
@@ -91,14 +96,20 @@ func _new_view(g: NeonGame, follow: bool) -> void:
 func _make_game(attract: bool) -> NeonGame:
 	var lv := GameData.level(Save.level)
 	var a := GameData.arena(lv.code)
-	var g := NeonGame.new({
+	var opts := {
 		"size": a.size, "mask": a.mask, "bots": lv.bots, "rider": Save.selected,
 		"countdown": 0.0 if attract else 3.0, "min_bold": lv.min_bold, "max_bold": lv.max_bold,
 		"bot_speed": lv.bot_speed, "win": lv.win, "nickname": Save.nickname,
 		"round_seconds": 10000.0 if attract else 45.0,
 		"speed_bonus": Save.engine * Save.ENGINE_STEP, "shield_bonus": Save.armor * Save.ARMOR_STEP,
-	})
-	if attract:
+	}
+	if promo:
+		opts.merge({"seed": promo.opts.seed, "countdown": 0.0, "round_seconds": promo.opts.seconds, "win": 101.0}, true)
+	var g := NeonGame.new(opts)
+	if promo:
+		# A bold bot rides for "you" so the clip shows big loops and KOs.
+		g.me.brain = BotBrain.new(1.5)
+	elif attract:
 		# In the menu backdrop "you" ride on your own, like a demo.
 		g.me.brain = BotBrain.new(1.0)
 		g.me.nickname = GameData.rider(Save.selected).name
@@ -631,6 +642,7 @@ func _build_hud() -> void:
 	hint.offset_right = 300
 	hint.offset_top = -170
 	hint.offset_bottom = -120
+	hint.visible = promo == null
 	r.add_child(hint)
 	var tw := hint.create_tween()
 	tw.tween_interval(4.0)
@@ -678,7 +690,9 @@ func _process(dt: float) -> void:
 	view.sync(dt)
 	if screen == Screen.PLAYING:
 		_update_hud()
-		if game.is_over() and not _round_over_handled:
+		if promo:
+			pass
+		elif game.is_over() and not _round_over_handled:
 			_round_over_handled = true
 			_end_round()
 		elif not game.me.alive and not game.revived and not _revive_offered:
@@ -769,7 +783,7 @@ func _update_hud() -> void:
 			Audio.play("count")
 	if game.power_drop_offered() and not Ads.rewarded_ready():
 		game.skip_power_drop()
-	_drop_btn.visible = game.power_drop_offered()
+	_drop_btn.visible = game.power_drop_offered() and promo == null
 	var scale := _minimap.size.x / game.size
 	for k in game.players.size():
 		var p := game.players[k]
