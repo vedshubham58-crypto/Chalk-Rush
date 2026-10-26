@@ -21,6 +21,10 @@ static func fonts() -> void:
 	body_font = FontVariation.new()
 	body_font.base_font = load("res://fonts/Exo2.ttf")
 	body_font.variation_opentype = {"wght": 700}
+	# Letters the neon fonts don't have (accents, Hindi) come from these.
+	var hindi: Font = load("res://fonts/NotoSansDevanagari.ttf")
+	title_font.fallbacks = [load("res://fonts/Exo2.ttf"), hindi]
+	body_font.fallbacks = [hindi]
 
 
 static func label(text: String, size := 28, color := Color.WHITE, title := false, align := HORIZONTAL_ALIGNMENT_CENTER) -> Label:
