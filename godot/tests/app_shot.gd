@@ -1,6 +1,6 @@
 extends SceneTree
 ## Opens the real app, optionally starts a round, and saves screenshots.
-## Args: <out prefix> <mode: menu|play|results|story> <seconds...>
+## Args: <out prefix> <mode: menu|play|results|story|missions|daily|garage|bonus> <seconds...>
 ## In story mode the intro moves on a page after each screenshot.
 
 func _initialize() -> void:
@@ -10,8 +10,14 @@ func _initialize() -> void:
 	var main = load("res://scenes/main.tscn").instantiate()
 	root.add_child(main)
 	await process_frame
-	if mode == "menu":
+	if mode in ["menu", "missions", "daily", "garage", "bonus"]:
 		main.show_menu()
+	match mode:
+		"missions": main._show_missions()
+		"daily":
+			main._show_daily()
+		"garage": main._show_garage()
+		"bonus": main.root_ui.add_child(load("res://scripts/bonus_rush.gd").new())
 	if mode == "story":
 		main.show_story()
 	if mode == "play" or mode == "results":
@@ -24,6 +30,11 @@ func _initialize() -> void:
 	for k in range(2, args.size()):
 		var at := float(args[k])
 		while t < at:
+			# Collect the Bonus Rush as soon as its boxes open, to reach the results.
+			for c in main.root_ui.get_children():
+				if c.get("_phase") == 1:
+					c.set("_phase", 2)
+					c.finished.emit(c.total)
 			if mode != "menu" and main.game and int(t * 10) % 7 == 0:
 				main.game.steer((main.game.me.dir + 1) % 4)
 			await process_frame

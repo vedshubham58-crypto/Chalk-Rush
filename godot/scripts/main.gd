@@ -43,6 +43,11 @@ var _revive_offered := false
 var _pause_ad_shown := false
 var _watched_video := false
 var _revive_watching := false
+## Your numbers this round for today's missions.
+var _powers_taken := 0
+var _loops_closed := 0
+## The daily reward pops up by itself once per app start.
+var _daily_offered := false
 
 
 func _ready() -> void:
@@ -91,6 +96,7 @@ func _make_game(attract: bool) -> NeonGame:
 		"countdown": 0.0 if attract else 3.0, "min_bold": lv.min_bold, "max_bold": lv.max_bold,
 		"bot_speed": lv.bot_speed, "win": lv.win, "nickname": Save.nickname,
 		"round_seconds": 10000.0 if attract else 45.0,
+		"speed_bonus": Save.engine * Save.ENGINE_STEP, "shield_bonus": Save.armor * Save.ARMOR_STEP,
 	})
 	if attract:
 		# In the menu backdrop "you" ride on your own, like a demo.
@@ -183,6 +189,12 @@ func show_menu() -> void:
 	var gap := Control.new()
 	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(gap)
+	var lang := UI.button(Lang.current().to_upper(), Color("394070"), 24, 72)
+	lang.custom_minimum_size.x = 84
+	lang.pressed.connect(func():
+		Lang.cycle()
+		show_menu())
+	top.add_child(lang)
 	var story := UI.button("STORY", Color("394070"), 24, 72)
 	story.custom_minimum_size.x = 130
 	story.pressed.connect(show_story)
@@ -204,6 +216,25 @@ func show_menu() -> void:
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(spacer)
+
+	# Missions, daily reward and garage.
+	var feats := HBoxContainer.new()
+	feats.add_theme_constant_override("separation", 12)
+	col.add_child(feats)
+	var to_claim := Save.missions_to_claim()
+	var mb := UI.button(tr("MISSIONS") + (" (%d)" % to_claim if to_claim > 0 else ""), UI.GREEN if to_claim > 0 else Color("2a6b8f"), 24, 84)
+	mb.pressed.connect(_show_missions)
+	var db := UI.button(tr("DAILY"), UI.GOLD if Save.daily_ready() else Color("2a6b8f"), 24, 84)
+	db.pressed.connect(_show_daily)
+	var gb := UI.button(tr("GARAGE"), Color("2a6b8f"), 24, 84)
+	gb.pressed.connect(_show_garage)
+	for b in [mb, db, gb]:
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		feats.add_child(b)
+	if to_claim > 0:
+		UI.breathe(mb, 0.05, 0.9)
+	if Save.daily_ready():
+		UI.breathe(db, 0.05, 0.9)
 
 	# Rider picker.
 	var rc := UI.card(rider.color)
@@ -238,9 +269,9 @@ func show_menu() -> void:
 	linfo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	lrow.add_child(linfo)
 	var star := " ★" if Save.level in Save.conquered else ""
-	linfo.add_child(UI.label("LEVEL %d / %d%s" % [Save.level + 1, GameData.LEVELS.size(), star], 24, Color(1, 1, 1, 0.75)))
+	linfo.add_child(UI.label(tr("LEVEL %d / %d%s") % [Save.level + 1, GameData.LEVELS.size(), star], 24, Color(1, 1, 1, 0.75)))
 	linfo.add_child(UI.label(lv.name.to_upper(), 40, lv.accent, true))
-	linfo.add_child(UI.label("Claim %d%% of the land to win" % int(lv.win), 22, Color(1, 1, 1, 0.7)))
+	linfo.add_child(UI.label(tr("Claim %d%% of the land to win") % int(lv.win), 22, Color(1, 1, 1, 0.7)))
 	var lnext := UI.icon_button("▶", lv.accent, 76)
 	lnext.disabled = Save.level >= Save.best_level
 	lnext.pressed.connect(func(): _pick_level(1))
@@ -251,7 +282,7 @@ func show_menu() -> void:
 		play = UI.button("PLAY", UI.PINK, 54, 130)
 		play.pressed.connect(start_round)
 	else:
-		play = UI.button("UNLOCK  ● %d" % rider.cost, UI.GOLD, 40, 130)
+		play = UI.button(tr("UNLOCK  ● %d") % rider.cost, UI.GOLD, 40, 130)
 		play.disabled = Save.coins < rider.cost
 		play.pressed.connect(func():
 			if Save.buy(rider.id):
@@ -264,6 +295,163 @@ func show_menu() -> void:
 
 	title.modulate.a = 0.0
 	title.create_tween().tween_property(title, "modulate:a", 1.0, 0.6)
+	if Save.daily_ready() and not _daily_offered:
+		_daily_offered = true
+		_show_daily()
+
+
+# ---------------------------------------------------------------- lobby panels
+
+## A card over the lobby with a title, some content and a close button.
+func _panel(title: String, color: Color, content: Control) -> Control:
+	var o := ColorRect.new()
+	o.set_anchors_preset(Control.PRESET_FULL_RECT)
+	o.color = Color(0.0, 0.0, 0.05, 0.7)
+	root_ui.add_child(o)
+	var c := UI.card(color)
+	c.set_anchors_preset(Control.PRESET_FULL_RECT)
+	c.offset_left = 30
+	c.offset_right = -30
+	c.offset_top = 150
+	c.offset_bottom = -150
+	o.add_child(c)
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 18)
+	c.add_child(v)
+	v.add_child(UI.glow_label(title, 56, color))
+	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	v.add_child(content)
+	var close := UI.button(tr("CLOSE"), Color("394070"), 32, 96)
+	close.pressed.connect(func():
+		o.queue_free()
+		show_menu())
+	v.add_child(close)
+	UI.pop(c, 0.8, 0.25)
+	return o
+
+
+func _show_missions() -> void:
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 14)
+	list.add_child(UI.label(tr("New missions every day"), 26, Color(1, 1, 1, 0.75)))
+	for k in Save.missions.size():
+		var m: Dictionary = Save.missions[k]
+		var info := Save.mission_info(m.id)
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.03, 0.06, 0.18, 0.9), Color(UI.GREEN, 0.6), 18, 2))
+		list.add_child(card)
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 12)
+		card.add_child(row)
+		var info_box := VBoxContainer.new()
+		info_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(info_box)
+		info_box.add_child(UI.label(tr(info.text) % info.target, 28, Color.WHITE, false, HORIZONTAL_ALIGNMENT_LEFT))
+		var bar := ProgressBar.new()
+		bar.show_percentage = false
+		bar.custom_minimum_size = Vector2(0, 14)
+		bar.max_value = info.target
+		bar.value = m.progress
+		bar.add_theme_stylebox_override("background", UI.box(Color(0, 0, 0, 0.5), Color.TRANSPARENT, 7))
+		bar.add_theme_stylebox_override("fill", UI.box(UI.GREEN, UI.GREEN, 7, 0, 6))
+		info_box.add_child(bar)
+		info_box.add_child(UI.label("%d / %d   ● %d" % [m.progress, info.target, info.reward], 22, Color(1, 1, 1, 0.7), false, HORIZONTAL_ALIGNMENT_LEFT))
+		var btn := UI.button(tr("CLAIM") if not m.claimed else "✓", UI.GREEN if Save.mission_done(m) and not m.claimed else Color("394070"), 26, 80)
+		btn.custom_minimum_size.x = 150
+		btn.disabled = m.claimed or not Save.mission_done(m)
+		btn.pressed.connect(func():
+			var got := Save.claim_mission(k)
+			if got > 0:
+				Audio.play("coin")
+				btn.text = "+%d" % got
+				btn.disabled = true)
+		row.add_child(btn)
+	list.add_child(UI.label(tr("Finish all 3 for a bonus of ● %d") % Save.MISSIONS_BONUS, 26, UI.GOLD))
+	_panel(tr("MISSIONS"), UI.GREEN, list)
+
+
+func _show_daily() -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 16)
+	box.add_child(UI.label(tr("Come back every day for bigger rewards!"), 26, Color(1, 1, 1, 0.8)))
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 10)
+	grid.add_theme_constant_override("v_separation", 10)
+	box.add_child(grid)
+	var slot := Save.daily_slot()
+	var ready := Save.daily_ready()
+	for k in Save.DAILY_REWARDS.size():
+		var day := k + 1
+		var past := day < slot or (day == slot and not ready)
+		var today := day == slot and ready
+		var c := UI.GOLD if today else (UI.GREEN if past else Color(0.4, 0.5, 0.8))
+		var tile := PanelContainer.new()
+		tile.custom_minimum_size = Vector2(140, 130)
+		tile.add_theme_stylebox_override("panel", UI.chamfer(Color(c.darkened(0.7), 0.9), c, 14, 3 if today else 1, 12 if today else 0))
+		var v := VBoxContainer.new()
+		v.alignment = BoxContainer.ALIGNMENT_CENTER
+		tile.add_child(v)
+		v.add_child(UI.label(tr("DAY %d") % day, 22, Color(1, 1, 1, 0.8)))
+		v.add_child(UI.label("✓" if past else "● %d" % Save.DAILY_REWARDS[k], 30, c, true))
+		grid.add_child(tile)
+		if today:
+			UI.breathe(tile, 0.06, 0.9)
+	if ready:
+		var claim := UI.button(tr("CLAIM  ● %d") % Save.DAILY_REWARDS[slot - 1], UI.GOLD, 34, 104)
+		var twice := UI.button(tr("▶ CLAIM x2  ● %d") % (Save.DAILY_REWARDS[slot - 1] * 2), UI.GREEN, 34, 104)
+		claim.pressed.connect(func():
+			Save.claim_daily()
+			Audio.play("coin")
+			show_menu())
+		twice.pressed.connect(func():
+			Ads.show_rewarded(func():
+				Save.claim_daily(2)
+				Audio.play("coin"), func():
+				show_menu()))
+		box.add_child(claim)
+		if Ads.rewarded_ready():
+			box.add_child(twice)
+	else:
+		box.add_child(UI.label(tr("Claimed! Come back tomorrow."), 30, UI.GREEN))
+	_panel(tr("DAILY REWARD"), UI.GOLD, box)
+
+
+func _show_garage() -> void:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	box.add_child(UI.label(tr("Upgrades work for every rider"), 26, Color(1, 1, 1, 0.75)))
+	var coins_lbl := UI.label("● %d" % Save.coins, 40, UI.GOLD, true)
+	box.add_child(coins_lbl)
+	for is_engine in [true, false]:
+		var card := PanelContainer.new()
+		card.add_theme_stylebox_override("panel", UI.chamfer(Color(0.03, 0.06, 0.18, 0.9), Color(UI.CYAN, 0.6), 18, 2))
+		box.add_child(card)
+		var v := VBoxContainer.new()
+		v.add_theme_constant_override("separation", 8)
+		card.add_child(v)
+		v.add_child(UI.label(tr("ENGINE") if is_engine else tr("ARMOR"), 36, UI.CYAN, true))
+		v.add_child(UI.label(tr("+3% top speed per level") if is_engine else tr("+0.6 s spawn shield per level"), 24, Color(1, 1, 1, 0.75)))
+		var pips := HBoxContainer.new()
+		pips.alignment = BoxContainer.ALIGNMENT_CENTER
+		pips.add_theme_constant_override("separation", 8)
+		v.add_child(pips)
+		var lvl := Save.engine if is_engine else Save.armor
+		for k in Save.MAX_UPGRADE:
+			var pip := Panel.new()
+			pip.custom_minimum_size = Vector2(70, 16)
+			pip.add_theme_stylebox_override("panel", UI.chamfer(UI.CYAN if k < lvl else Color(1, 1, 1, 0.15), UI.CYAN, 6, 0, 6 if k < lvl else 0))
+			pips.add_child(pip)
+		var cost := Save.upgrade_cost(lvl)
+		var buy := UI.button(tr("MAX") if cost < 0 else tr("UPGRADE  ● %d") % cost, UI.PINK, 30, 88)
+		buy.disabled = cost < 0 or Save.coins < cost
+		buy.pressed.connect(func():
+			if Save.upgrade(is_engine):
+				Audio.play("power")
+				root_ui.get_child(root_ui.get_child_count() - 1).queue_free()
+				_show_garage())
+		v.add_child(buy)
+	_panel(tr("GARAGE"), UI.CYAN, box)
 
 
 func _pick_rider(step: int) -> void:
@@ -288,6 +476,8 @@ func start_round() -> void:
 	_watched_video = false
 	_turns.clear()
 	_ko_by_me = 0
+	_powers_taken = 0
+	_loops_closed = 0
 	_round_over_handled = false
 	_revive_offered = false
 	_new_view(_make_game(false), true)
@@ -511,6 +701,7 @@ func _handle_events() -> void:
 				var at := Vector3(e.x, 0.5, e.y)
 				view.ring(at, p.color, 4.0 + minf(e.gained / 12.0, 10.0))
 				if p.id == game.me.id and playing and e.gained > 0:
+					_loops_closed += 1
 					view.burst(at, p.color, 30, 7.0)
 					Audio.play("capture", -2.0, 1.0 + minf(e.gained / 400.0, 0.3))
 					_toast("+%.1f%%" % (e.gained * 100.0 / game.area), UI.GREEN)
@@ -527,7 +718,7 @@ func _handle_events() -> void:
 				if e.killer == game.me.id:
 					_ko_by_me += 1
 					_big("KO!", UI.PINK)
-					_toast("You knocked out %s" % v.display_name(), UI.PINK)
+					_toast(tr("You knocked out %s") % v.display_name(), UI.PINK)
 					view.shake(0.8)
 					_slow_motion()
 				elif v.id == game.me.id:
@@ -535,8 +726,9 @@ func _handle_events() -> void:
 					_slow_motion()
 			"picked":
 				if e.player == game.me.id and playing:
+					_powers_taken += 1
 					Audio.play("power")
-					_toast(NeonGame.POWER_NAMES[e.power] + "!", ArenaView.POWER_COLORS[e.power])
+					_toast(tr(NeonGame.POWER_NAMES[e.power]) + "!", ArenaView.POWER_COLORS[e.power])
 					view.ring(Vector3(e.x, 0.5, e.y), ArenaView.POWER_COLORS[e.power], 3.0)
 			"coin":
 				if playing:
@@ -549,7 +741,7 @@ func _handle_events() -> void:
 				if playing:
 					Audio.play("streak")
 					var words := ["", "", "DOUBLE KO!", "TRIPLE KO!", "UNSTOPPABLE!"]
-					_toast(words[mini(e.count, 4)], UI.GOLD)
+					_toast(tr(words[mini(e.count, 4)]), UI.GOLD)
 	game.events.clear()
 
 
@@ -746,7 +938,7 @@ func _overlay(title: String, color: Color, buttons: Array, extra: Control = null
 func _offer_revive() -> void:
 	_revive_offered = true
 	var by := game.me.knocked_out_by
-	var info := UI.label(("Knocked out by %s" % by) if by != "" else "Knocked out!", 30, Color(1, 1, 1, 0.85))
+	var info := UI.label((tr("Knocked out by %s") % by) if by != "" else "Knocked out!", 30, Color(1, 1, 1, 0.85))
 	var secs := 5
 	var count := UI.label("%d" % secs, 64, UI.GOLD, true)
 	var box := VBoxContainer.new()
@@ -793,12 +985,16 @@ func _end_round() -> void:
 	var won := game.won()
 	var lv := GameData.level(Save.level)
 	var pct := game.percent(game.me)
+	var rank := game.my_rank()
 	var coins := 5 + game.me.coins + int(pct * 2.0) + _ko_by_me * 10 + (50 if won else 0)
 	if game.me.rider.perk == GameData.Perk.MORE_COINS:
 		coins = int(coins * 1.5)
 	var was_best := Save.best_level
 	var first_win: bool = won and not (Save.level in Save.conquered)
-	var xp := Save.finish_round(won, coins, _ko_by_me, game.best_streak, pct)
+	var res := Save.finish_round(won, coins, _ko_by_me, game.best_streak, pct, {
+		"kos": _ko_by_me, "land": int(pct), "powers": _powers_taken, "coins": game.me.coins,
+		"loops": _loops_closed, "rank": rank,
+	})
 	Audio.play("win" if won else "lose")
 	await get_tree().create_timer(0.6).timeout
 	# An ad between rounds, unless you already watched a video this round.
@@ -807,6 +1003,16 @@ func _end_round() -> void:
 		Ads.show_interstitial(func(): shown[0] = true)
 		while not shown[0]:
 			await get_tree().process_frame
+
+	# Every win earns a Bonus Rush.
+	var bonus := 0
+	if won:
+		var r0 := _new_ui()
+		var rush := BonusRush.new()
+		r0.add_child(rush)
+		bonus = await rush.finished
+		Save.coins += bonus
+		Save.save()
 
 	var r := _new_ui()
 	var shade := ColorRect.new()
@@ -817,73 +1023,114 @@ func _end_round() -> void:
 	col.set_anchors_preset(Control.PRESET_FULL_RECT)
 	col.offset_left = 36
 	col.offset_right = -36
-	col.offset_top = 90
-	col.offset_bottom = -60
-	col.add_theme_constant_override("separation", 18)
+	col.offset_top = 70
+	col.offset_bottom = -50
+	col.add_theme_constant_override("separation", 14)
 	r.add_child(col)
 
-	var title := "VICTORY!" if won else ("KNOCKED OUT" if not game.me.alive else "TIME UP")
+	var title := tr("VICTORY!") if won else (tr("KNOCKED OUT") if not game.me.alive else tr("TIME UP"))
 	var tcolor := UI.GOLD if won else (UI.PINK if not game.me.alive else UI.CYAN)
 	var t := UI.glow_label(title, 76, tcolor)
 	col.add_child(t)
 	UI.pop(t, 0.3, 0.5)
 	if first_win:
-		var cq := UI.glow_label("%s CONQUERED!" % lv.name.to_upper(), 36, UI.GREEN)
-		col.add_child(cq)
-	col.add_child(UI.label("#%d of %d riders" % [game.my_rank(), game.players.size()], 34, Color.WHITE))
+		col.add_child(UI.glow_label(tr("%s CONQUERED!") % lv.name.to_upper(), 36, UI.GREEN))
+	col.add_child(UI.label(tr("#%d of %d riders") % [rank, game.players.size()], 34, Color.WHITE))
+	# The near miss, or the streak: whatever makes you want one more go.
+	var hook := ""
+	var leader: NeonGame.Player = game.ranking()[0]
+	if won and Save.win_streak > 1:
+		hook = tr("%d WIN STREAK!") % Save.win_streak
+	elif not won and leader != game.me:
+		var gap := game.percent(leader) - pct
+		if rank <= 3 and gap < 6.0:
+			hook = tr("So close! Only %.1f%% behind %s") % [gap, leader.display_name()]
+		else:
+			hook = tr("Claim %d%% to conquer %s") % [int(game.win_percent), lv.name]
+	if hook != "":
+		var hl := UI.glow_label(hook, 30, UI.GOLD if won else UI.PINK)
+		hl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		col.add_child(hl)
+		UI.breathe(hl, 0.04, 1.0)
 
 	var stats := UI.card(tcolor)
 	col.add_child(stats)
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 30)
-	grid.add_theme_constant_override("v_separation", 8)
+	grid.add_theme_constant_override("v_separation", 4)
 	stats.add_child(grid)
-	for row in [["Land", "%.1f%%" % pct], ["Knockouts", str(_ko_by_me)], ["Coins", "+%d" % coins], ["XP", "+%d" % xp]]:
-		var a := UI.label(row[0], 32, Color(1, 1, 1, 0.75), false, HORIZONTAL_ALIGNMENT_LEFT)
+	var rows := [[tr("Land"), "%.1f%%" % pct], [tr("Knockouts"), str(_ko_by_me)], [tr("Coins"), "+%d" % coins]]
+	if res.streak_bonus > 0:
+		rows.append([tr("Streak bonus"), "+%d" % res.streak_bonus])
+	if bonus > 0:
+		rows.append([tr("Bonus Rush"), "+%d" % bonus])
+	rows.append([tr("XP"), "+%d" % res.xp])
+	for row in rows:
+		var a := UI.label(row[0], 30, Color(1, 1, 1, 0.75), false, HORIZONTAL_ALIGNMENT_LEFT)
 		a.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(a)
-		grid.add_child(UI.label(row[1], 40, UI.GOLD if row[0] == "Coins" else Color.WHITE, false, HORIZONTAL_ALIGNMENT_RIGHT))
+		grid.add_child(UI.label(row[1], 36, UI.GOLD if row[1].begins_with("+") and row[0] != tr("XP") else Color.WHITE, false, HORIZONTAL_ALIGNMENT_RIGHT))
 
-	var lvl := UI.label("Rider level %d" % Save.player_level(), 28, UI.CYAN)
+	var lvl := UI.label(tr("Rider level %d") % Save.player_level(), 26, UI.CYAN)
 	col.add_child(lvl)
 	var bar := ProgressBar.new()
 	bar.show_percentage = false
-	bar.custom_minimum_size = Vector2(0, 16)
+	bar.custom_minimum_size = Vector2(0, 14)
 	bar.max_value = 1.0
 	bar.step = 0.001
-	bar.add_theme_stylebox_override("background", UI.box(Color(0, 0, 0, 0.5), Color.TRANSPARENT, 8))
-	bar.add_theme_stylebox_override("fill", UI.box(UI.CYAN, UI.CYAN, 8, 0, 8))
+	bar.add_theme_stylebox_override("background", UI.box(Color(0, 0, 0, 0.5), Color.TRANSPARENT, 7))
+	bar.add_theme_stylebox_override("fill", UI.box(UI.CYAN, UI.CYAN, 7, 0, 8))
 	col.add_child(bar)
 	bar.create_tween().tween_property(bar, "value", Save.level_progress(), 0.8).set_trans(Tween.TRANS_CUBIC)
+
+	# Missions: any finished this round, else the one closest to done.
+	for m in res.missions:
+		var info := Save.mission_info(m.id)
+		col.add_child(UI.glow_label(tr("MISSION DONE: ") + tr(info.text) % info.target, 26, UI.GREEN))
+	if res.missions.is_empty():
+		var next_m = null
+		for m in Save.missions:
+			if not m.claimed and not Save.mission_done(m):
+				if next_m == null or float(m.progress) / Save.mission_info(m.id).target > float(next_m.progress) / Save.mission_info(next_m.id).target:
+					next_m = m
+		if next_m:
+			var info := Save.mission_info(next_m.id)
+			col.add_child(UI.label(tr("Mission: ") + (tr(info.text) % info.target) + "  %d/%d" % [next_m.progress, info.target], 26, Color(UI.GREEN, 0.9)))
 
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(spacer)
 
-	if Ads.rewarded_ready() and coins > 0:
-		var dbl := UI.button("▶ DOUBLE COINS  +%d" % coins, UI.GOLD, 32, 104)
-		dbl.pressed.connect(func():
-			Ads.show_rewarded(func():
-				Save.coins += coins
-				Save.save()
-				dbl.text = "COINS DOUBLED!"
-				dbl.disabled = true))
-		col.add_child(dbl)
-		UI.breathe(dbl, 0.05, 0.8)
 	if won and Save.best_level > was_best:
-		var nb := UI.button("NEXT: %s ▶" % GameData.level(Save.best_level).name.to_upper(), UI.GREEN, 36, 120)
+		var nb := UI.button(tr("NEXT: %s ▶") % GameData.level(Save.best_level).name.to_upper(), UI.GREEN, 36, 120)
 		nb.pressed.connect(func():
 			Save.level = Save.best_level
 			Save.save()
 			start_round())
 		col.add_child(nb)
 		UI.breathe(nb, 0.04)
-	var again := UI.button("PLAY AGAIN", UI.PINK, 40, 120)
+	var again := UI.button(tr("ONE MORE ROUND!") if not won else tr("PLAY AGAIN"), UI.PINK, 42, 124)
 	again.pressed.connect(start_round)
 	col.add_child(again)
-	if not won:
+	if not (won and Save.best_level > was_best):
 		UI.breathe(again, 0.04)
-	var home := UI.button("HOME", Color("394070"), 32, 96)
+	var low := HBoxContainer.new()
+	low.add_theme_constant_override("separation", 12)
+	col.add_child(low)
+	var home := UI.button(tr("HOME"), Color("394070"), 30, 96)
+	home.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	home.pressed.connect(show_menu)
-	col.add_child(home)
+	low.add_child(home)
+	if Ads.rewarded_ready() and coins > 0:
+		var dbl := UI.button(tr("▶ x2 COINS +%d") % coins, UI.GOLD, 28, 96)
+		dbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		dbl.size_flags_stretch_ratio = 1.6
+		dbl.pressed.connect(func():
+			Ads.show_rewarded(func():
+				Save.coins += coins
+				Save.save()
+				dbl.text = tr("COINS DOUBLED!")
+				dbl.disabled = true))
+		low.add_child(dbl)
+		UI.breathe(dbl, 0.05, 0.8)

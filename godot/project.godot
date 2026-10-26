@@ -32,6 +32,7 @@ anti_aliasing/quality/msaa_3d=1
 
 Save="*res://scripts/save.gd"
 Audio="*res://scripts/audio.gd"
+Lang="*res://scripts/lang.gd"
 Ads="*res://scripts/ads.gd"
 
 [editor_plugins]
